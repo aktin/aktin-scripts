@@ -1,13 +1,13 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  publish_broker_dummy_requests.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Unzips given zip with dummy requests and publishes
-#               the included requests to given nodes via given AKTIN
-#               Broker
-# ATTENTION:    This script is still static. The zip file must contain
-#               exactly the requests specified in the script
+# Purpose:      Unzips given zip with dummy requests and publishes the included requests to given nodes
+#               via given AKTIN Broker
+# ATTENTION:    This script is still static. The zip file must contain exactly the requests specified
+#               in the script
 #--------------------------------------
 
 set -euo pipefail

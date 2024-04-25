@@ -1,10 +1,10 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  apply_aktin_backup.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         25 Apr 24
-# Purpose:      Installs a new AKTIN DWH from repository
-#               and fills it with backed up data from a
+# Purpose:      Installs a new AKTIN DWH from repository and fills it with backed up data from a
 #               given tar.gz file
 #--------------------------------------
 

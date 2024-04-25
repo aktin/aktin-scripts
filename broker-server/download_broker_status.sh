@@ -1,10 +1,10 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  download_broker_status.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Downloads all request processing timestamps
-#               of corresponding nodes of AKTIN Broker requests
+# Purpose:      Downloads all request processing timestamps of corresponding nodes of AKTIN Broker requests
 #               in given id range
 #--------------------------------------
 

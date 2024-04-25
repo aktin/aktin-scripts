@@ -1,11 +1,11 @@
 #! /bin/bash
 #--------------------------------------
 # Script Name:  submit_dummy_result_for_request.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Imitates a broker-client to submit dummy
-#               results to a given Broker request and set
-#               its status to "completed"
+# Purpose:      Imitates a broker-client to submit dummy results to a given Broker request and
+#               set its status to "completed"
 #--------------------------------------
 
 # ensure the correct number of arguments is provided

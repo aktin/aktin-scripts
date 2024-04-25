@@ -1,10 +1,10 @@
 #! /bin/bash
 #--------------------------------------
 # Script Name:  set_client_request_to_retrieved.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Imitates a broker-client to set the status for
-#               a given Broker request to "retrieved"
+# Purpose:      Imitates a broker-client to set the status for a given Broker request to "retrieved"
 #--------------------------------------
 
 # ensure the correct number of arguments is provided

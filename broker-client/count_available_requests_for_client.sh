@@ -1,10 +1,10 @@
 #! /bin/bash
 #--------------------------------------
 # Script Name:  count_available_requests_for_client.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Imitates a broker-client to count the available
-#               requests for that client on a given AKTIN Broker
+# Purpose:      Imitates a broker-client to count the available requests for that client on a given AKTIN Broker
 #--------------------------------------
 
 # ensure the correct number of arguments is provided

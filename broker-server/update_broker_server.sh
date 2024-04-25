@@ -1,13 +1,11 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  update_broker_server.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Downloads given version of AKTIN Broker
-#               and updates given local Broker to this
-#               version
-# ATTENTION:    Only useable on production server with
-#               "broker" service 
+# Purpose:      Downloads given version of AKTIN Broker and updates given local Broker to this version
+# ATTENTION:    Only useable on production server with "broker" service
 #--------------------------------------
 
 set -euo pipefail

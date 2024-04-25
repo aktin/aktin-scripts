@@ -1,10 +1,10 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  delete_broker_requests.sh
+# Version:      1.0
 # Author:       akombeiz@ukaachen.de
 # Date:         24 Apr 24
-# Purpose:      Deletes all requests from AKTIN Broker in
-#               given id range
+# Purpose:      Deletes all requests from AKTIN Broker in given id range
 #--------------------------------------
 
 set -euo pipefail
