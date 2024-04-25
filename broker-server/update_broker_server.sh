@@ -6,6 +6,8 @@
 # Purpose:      Downloads given version of AKTIN Broker
 #               and updates given local Broker to this
 #               version
+# ATTENTION:    Only useable on production server with
+#               "broker" service 
 #--------------------------------------
 
 set -euo pipefail

@@ -34,13 +34,13 @@ elif [[ -n $(ls /opt/wildfly-*) ]]; then
 fi
 
 extract_tarfile_and_get_folder_path() {
-    tarfile="$1"
+    local tar="$1"
     # create a temporary directory for extraction
-    temp_dir=$(mktemp -d)
+    local temp_dir=$(mktemp -d)
     # extract the archive into the temporary directory
-    tar -xf "$tarfile" -C "$temp_dir"
+    tar -xf "$tar" -C "$temp_dir"
     # check if exactly one folder exists in the extracted content
-    folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
+    local folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
     if [[ $(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d | wc -l) -ne 1 ]]; then
         echo "Error: Archive contains multiple folders or no folders"
         rm -rf "$temp_dir"  # Clean up temp directory
@@ -90,7 +90,7 @@ patch_aktin_properties() {
                 fi
             done </etc/aktin/aktin.properties
         fi
-    done <$backup_folder/backup_aktin.properties
+    done <${backup_folder}/backup_aktin.properties
     chown wildfly:wildfly /etc/aktin/aktin.properties
 }
 
@@ -107,21 +107,33 @@ import_folder_backup() {
     local backup_folder=$1
     local source_folder=$2
     echo "importing backup of $source_folder"
-    cp -r $backup_folder$source_folder $source_folder
+    cp -r $backup_folder$source_folder/* $source_folder
     chown -R wildfly:wildfly $source_folder
 }
 
 import_databases_backup() {
     local backup_folder=$1
     echo "deleting aktin and i2b2 databases"
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS aktin; DROP USER IF EXISTS aktin;"
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS i2b2; DROP USER IF EXISTS i2b2crcdata; DROP USER IF EXISTS i2b2hive; DROP USER IF EXISTS i2b2imdata; DROP USER IF EXISTS i2b2metadata; DROP USER IF EXISTS i2b2pm; DROP USER IF EXISTS i2b2workdata;"
+    sudo -u postgres dropdb --if-exists aktin
+    sudo -u postgres dropuser --if-exists aktin
+    sudo -u postgres dropdb --if-exists i2b2
+    sudo -u postgres dropuser --if-exists i2b2crcdata
+    sudo -u postgres dropuser --if-exists i2b2hive
+    sudo -u postgres dropuser --if-exists i2b2imdata
+    sudo -u postgres dropuser --if-exists i2b2metadata
+    sudo -u postgres dropuser --if-exists i2b2pm
+    sudo -u postgres dropuser --if-exists i2b2workdata
     echo "reinitialising aktin and i2b2 databases"
-    sudo -u postgres psql -c "CREATE DATABASE aktin; \connect aktin; CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
-    sudo -u postgres psql -c "CREATE DATABASE i2b2; \connect i2b2; CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
-    echo "importing the backup  of aktin and i2b2 databases"
-    sudo -u postgres psql -d i2b2 -f $backup_folder/backup_i2b2.sql
-    sudo -u postgres psql -d aktin -f $backup_folder/backup_aktin.sql
+    sudo -u postgres psql -c "CREATE DATABASE aktin;"
+    sudo -u postgres psql -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
+    sudo -u postgres psql -c "CREATE DATABASE i2b2;"
+    sudo -u postgres psql -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
+    echo "copy database backups to /tmp/"
+    cp "$backup_folder/backup_i2b2.sql" /tmp/
+    cp "$backup_folder/backup_aktin.sql" /tmp/
+    echo "importing the backup of aktin and i2b2 databases"
+    sudo -u postgres psql -d i2b2 -f "/tmp/backup_i2b2.sql"
+    sudo -u postgres psql -d aktin -f "/tmp/backup_aktin.sql"
 }
 
 run_info_service() {
