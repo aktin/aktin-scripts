@@ -433,8 +433,10 @@ class ObservationFactEntryHandler(TableEntryHandler):
         return result is not None
 
     def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
-        self._remove_observation_entry(enc_num)
-        self._insert_observation_entry(enc_num, pat_num, entry)
+        removed_num = self._remove_observation_entry(enc_num)
+        inserted_num = self._insert_observation_entry(enc_num, pat_num, entry)
+        if removed_num < inserted_num:
+            self.__logger.increase_new_imported(inserted_num-removed_num)
 
     def _remove_observation_entry(self, enc_num: int):
         """
@@ -459,16 +461,16 @@ class ObservationFactEntryHandler(TableEntryHandler):
 
         try:
             count = self._conn.execute(count_query)
-            self.__logger.increase_new_imported(len(count.fetchall()))
             self._conn.execute(query)
+            return len(count.fetchall())
         except db.exc.SQLAlchemyError:
             self._conn.rollback()
             print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
 
     def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         import_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        _imported_num = 0
         for diagnose in entry.get_diagnoses():
-            print(diagnose)
             query = (
                 db.insert(self._table)
                 .values(
@@ -485,10 +487,11 @@ class ObservationFactEntryHandler(TableEntryHandler):
             try:
                 self._conn.execute(query)
                 self.__logger.increase_db_insert()
-                self.__logger.decrease_new_imported()
+                _imported_num += 1
             except db.exc.SQLAlchemyError:
                 self._conn.rollback()
                 print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
+        return _imported_num
 
 
 class EncounterMappingEntryHandler(TableEntryHandler):
