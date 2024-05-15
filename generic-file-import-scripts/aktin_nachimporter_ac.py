@@ -36,7 +36,7 @@ import pandas as pd
 
 class DiagnoseData:
     """
-    This class contains diagnose data for updating the database.
+    This class contains diagnostic data for updating the database.
     """
 
     def __init__(self):
@@ -65,9 +65,9 @@ class DiagnoseData:
 
 class SingletonMeta(type):
     """
-     Metaclass implementing the Singleton design pattern.
-     This metaclass ensures that only one instance of each class using it is created.
-     """
+    Metaclass that implements the Singleton design pattern.
+    This metaclass ensures that only one instance of any class that uses it is created.
+    """
     _instances = {}
 
     def __call__(cls, *args, **kwargs):
@@ -78,9 +78,9 @@ class SingletonMeta(type):
 
 class SingletonABCMeta(ABCMeta):
     """
-       Metaclass implementing the Singleton design pattern for abstract base classes (ABCs).
-       This metaclass ensures that only one instance of each ABC using it is created.
-       """
+    Metaclass that implements the Singleton design pattern for Abstract Base Classes (ABCs).
+    This metaclass ensures that only one instance of each ABC that uses it is created.
+    """
     _instances = {}
 
     def __call__(cls, *args, **kwargs):
@@ -90,9 +90,16 @@ class SingletonABCMeta(ABCMeta):
 
 
 class Logger(metaclass=SingletonMeta):
+    """
+    This class provides logging for displaying the status of the update process. It displays the number of
+    encounters in the csv file, counts the number of updated encounter diagnoses, and counts the number of non-updatable
+    diagnoses because the encounter number doesn't exist in the database.
+    """
     def __init__(self):
         self.csv_encounters = 0
+        self.invalid_cases = 0
         self.successful_insert = 0
+        self.new_imported = 0
 
     def set_csv_encounters(self, csv_encounters):
         self.csv_encounters = csv_encounters
@@ -106,13 +113,34 @@ class Logger(metaclass=SingletonMeta):
     def get_db_insert(self):
         return self.successful_insert
 
+    def increase_invalid(self):
+        self.invalid_cases += 1
+
+    def get_invalid_cases(self):
+        return self.invalid_cases
+
+    def increase_new_imported(self, num=1):
+        self.new_imported += num
+
+    def decrease_new_imported(self):
+        self.new_imported -= 1
+
+    def get_new_imported(self):
+        return self.new_imported
+
+    def get_updated(self):
+        _new_imported = self.get_new_imported()
+        return self.successful_insert - _new_imported
+
 
 class CSVReader(metaclass=SingletonMeta):
-    __seperator: str = ';'
-    __encoding: str = 'utf-8'
+
+    __seperator: str = '; '
+    __encoding: str = 'latin_1'
 
     def __init__(self):
         self.__path_csv = None
+        self.__logger = Logger()
 
     def is_csv_file(self, file_path):
         _, file_extension = os.path.splitext(file_path)
@@ -123,21 +151,25 @@ class CSVReader(metaclass=SingletonMeta):
         if is_csv:
             self.__path_csv = path_csv
         else:
-            raise Exception('Required CSV, got: '+file_type)
+            raise Exception('Required CSV, got: ' + file_type)
 
     def iter_rows(self):
         row_count = 0
         for row in pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str):
             row_count += 1
             yield row
-        Logger().set_csv_encounters(row_count)
+        self.__logger.set_csv_encounters(row_count)
 
 
 class AktinImporter:
-    """This class implements the main functionality and structures the pipline for updating."""
+    """
+    This class implements the pipline for updating encounter data in the AKTIN Data Warehouse.
+    The update result will be Logged at the end by :class:'Logger'.
+    """
 
     def __init__(self):
         self.__reader = CSVReader()
+        self.__logger = Logger()
         self.__pipeline = self.__init_pipeline()
         os.environ['sourcesystem_cd'] = ('gfi_' + os.environ['script_id']
                                          + 'V' + os.environ['script_version']
@@ -145,18 +177,28 @@ class AktinImporter:
 
     @staticmethod
     def __init_pipeline():
+        """
+        This method updates the data class :class:'DiagnoseData' by using the specified column handlers.
+        @:return
+        """
         eid = EncounterIDHandler()
         pid = PatientIDHandler(eid)
         icd = ICDHandler(pid)
         return icd
 
     def import_csv(self, path_csv: str):
+        """
+        This method reads data from a CSV file located at the specified path and updates the database on that basis.
+        It utilizes various handlers to interact with the tables of the database.
+        @:param path_csv: Path to the CSV file
+        """
         conn = DatabaseConnection()
         connection = conn.connect()
         pat_map = PatientMappingEntryHandler(connection)
         enc_map = EncounterMappingEntryHandler(connection)
         obs = ObservationFactEntryHandler(connection)
         self.__reader.set_csv_path(path_csv)
+
         for index, r in enumerate(self.__reader.iter_rows()):
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
@@ -164,13 +206,23 @@ class AktinImporter:
                 enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
                 pat_num = pat_map.get_patient_num_for_ide(data.get_pat_ide())
                 obs.update_entries(enc_num, pat_num, data)
+            else:
+                self.__logger.increase_invalid()
+
         conn.disconnect()
-        print('Encounters: ' + str(Logger().get_csv_encounters()) + ', Inserted Diagnoses: ' + str(Logger().get_db_insert()))
+        print('Encounters: ' + str(self.__logger.get_csv_encounters()) + ', ' +
+              'Valid: ' + str(self.__logger.get_csv_encounters() - self.__logger.get_invalid_cases()) + ', ' +
+              'Inserted: ' + str(self.__logger.get_db_insert()) + ', ' +
+              'Updated: ' + str(self.__logger.get_updated()) + ', ' +
+              'New imported: ' + str(self.__logger.get_new_imported())
+              )
 
 
 class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
-    """This abstract class is used to process columns from the csv. Each
-    child class checks for one specific column and updates the DiagnoseData object."""
+    """
+    This abstract class is used to process columns from the csv. Each
+    child class handles its specified column and updates the DiagnoseData object accordingly.
+    """
     _column_name: str
 
     def __init__(self, successor: 'PatientDataColumnHandler' = None):
@@ -184,7 +236,7 @@ class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
                 return self.__successor.update_pat_from_row(data, row, index)
             return data
         except Exception:
-            print(f'{self.__class__.__name__}: Invalid patient in row {index}, '+self.__successor._column_name)
+            print(f'{self.__class__.__name__}: Invalid patient in row {index}, ' + self.__successor._column_name)
             return None
 
     @abstractmethod
@@ -196,7 +248,7 @@ class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
 
 
 class EncounterIDHandler(PatientDataColumnHandler):
-    _column_name = 'Fall'
+    _column_name = 'Aufnahmenummer'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
@@ -206,7 +258,7 @@ class EncounterIDHandler(PatientDataColumnHandler):
 
 
 class PatientIDHandler(PatientDataColumnHandler):
-    _column_name = 'Patient'
+    _column_name = 'Patientennummer'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
@@ -216,7 +268,7 @@ class PatientIDHandler(PatientDataColumnHandler):
 
 
 class ICDHandler(PatientDataColumnHandler):
-    _column_name = 'icd'
+    _column_name = 'Entlassdiagnosen'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row).split(',')
@@ -225,6 +277,11 @@ class ICDHandler(PatientDataColumnHandler):
 
 
 class Helper(metaclass=SingletonMeta):
+    """
+    A utility class for various helper functions.
+    This class provides methods to hash filenames, convert dates to i2b2 format and
+    anonymizing patient and encounter identifiers.
+    """
 
     def __init__(self):
         self.__path_properties = os.environ['path_aktin_properties']
@@ -236,10 +293,19 @@ class Helper(metaclass=SingletonMeta):
         self.__enc_root = self.__get_aktin_property('cda.encounter.root.preset')
 
     def __get_hash_algorithm_name(self) -> str:
+        """
+        Retrieves the hash algorithm name from the aktin properties file.
+        Uses SHA1 if no algorith is found at 'pseudonym.algorithm'.
+        """
         name = self.__get_aktin_property('pseudonym.algorithm') or 'sha1'
         return str.lower(name.replace('-', '', ).replace('/', '_'))
 
     def __get_aktin_property(self, prop: str) -> str:
+        """
+        Retrieves a property value from aktin.properties.
+        :param prop:  The property key
+        :return: The property value
+        """
         with open(self.__path_properties) as properties:
             for line in properties:
                 if '=' in line:
@@ -272,6 +338,12 @@ class Helper(metaclass=SingletonMeta):
         return self.__anonymize(self.__pat_root, ext)
 
     def __anonymize_composite(self, composite: str):
+        """
+        Anonymizes a composite string.
+
+        @:param composite: The composite string to be anonymized.
+        @:return The anonymized composite string.
+        """
         buffer = composite.encode('UTF-8')
         alg = getattr(hashlib, self.__alg)()
         alg.update(buffer)
@@ -284,7 +356,13 @@ class Helper(metaclass=SingletonMeta):
 
 
 class DatabaseConnection(metaclass=SingletonMeta):
+    """
+    A singleton class for managing database connections.
 
+    This class handles the connection to the PostgreSQL database using the provided
+    environment variables for username, password, and connection URL. It stores a connection and keeps
+    it open until it is closed manually.
+    """
     def __init__(self):
         self.__username = os.environ['username']
         self.__password = os.environ['password']
@@ -309,25 +387,42 @@ class DatabaseConnection(metaclass=SingletonMeta):
 
 
 class TableEntryHandler(metaclass=SingletonABCMeta):
-    """This abstract class implements the basic form of interaction with a table that is defined."""
+    """
+    This abstract class manages the necessary functionality to enable interaction with a table in the database.
+    """
     _table_name: str
 
     def __init__(self, conn: Connection):
         self._conn = conn
         self._table = self.__reflect_table()
+        self.__logger = Logger()
 
     def __reflect_table(self) -> db.schema.Table:
         return db.Table(self._table_name, db.MetaData(), autoload_with=self._conn)
 
 
 class ObservationFactEntryHandler(TableEntryHandler):
+    """
+    This class inherits from TableEntryHandler and provides methods to update
+    and insert observation fact entries in the database table.
+    """
     _table_name = 'observation_fact'
 
     def __init__(self, conn: Connection):
         super().__init__(conn)
+        self.__logger = Logger()
         self.__script_id = os.environ['script_id']
+        os.environ['sourcesystem_cd'] = ('gfi_' + os.environ['script_id']
+                           + 'V' + os.environ['script_version']
+                           + '_' + Helper().hash_filename()[:50])
 
     def update_entries(self, enc_num: int, pat_num: int, data: DiagnoseData):
+        """
+        Updates the database if the specified encounter in :param:'data' exists in the database
+        :param enc_num
+        :param pat_num
+        :param data
+        """
         if self.__check_if_observation_exists(enc_num):
             self._update_table_entry(enc_num, pat_num, data)
 
@@ -342,6 +437,18 @@ class ObservationFactEntryHandler(TableEntryHandler):
         self._insert_observation_entry(enc_num, pat_num, entry)
 
     def _remove_observation_entry(self, enc_num: int):
+        """
+        Removes the observation fact entries from the database with matching
+        encounter numbers :param:'enc_num' and different sourcesystem code.
+        :param enc_num:
+        """
+        count_query = (
+            db.select(self._table.c)
+            .where(
+                (self._table.c.encounter_num == enc_num) &
+                (self._table.c.sourcesystem_cd != os.environ['sourcesystem_cd'])
+            )
+        )
         query = (
             db.delete(self._table)
             .where(
@@ -349,7 +456,10 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 (self._table.c.sourcesystem_cd != os.environ['sourcesystem_cd'])
             )
         )
+
         try:
+            count = self._conn.execute(count_query)
+            self.__logger.increase_new_imported(len(count.fetchall()))
             self._conn.execute(query)
         except db.exc.SQLAlchemyError:
             self._conn.rollback()
@@ -357,15 +467,15 @@ class ObservationFactEntryHandler(TableEntryHandler):
 
     def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         import_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        sourcesystem_cd = os.environ['sourcesystem_cd']
         for diagnose in entry.get_diagnoses():
+            print(diagnose)
             query = (
                 db.insert(self._table)
                 .values(
                     encounter_num=enc_num,
                     patient_num=pat_num,
                     concept_cd=diagnose,
-                    sourcesystem_cd=sourcesystem_cd,
+                    sourcesystem_cd=os.environ['sourcesystem_cd'],
                     import_date=import_date,
                     start_date=import_date,
                     provider_id='@',
@@ -374,7 +484,8 @@ class ObservationFactEntryHandler(TableEntryHandler):
             )
             try:
                 self._conn.execute(query)
-                Logger().increase_db_insert()
+                self.__logger.increase_db_insert()
+                self.__logger.decrease_new_imported()
             except db.exc.SQLAlchemyError:
                 self._conn.rollback()
                 print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
