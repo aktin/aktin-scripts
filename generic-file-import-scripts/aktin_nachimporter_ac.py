@@ -43,6 +43,7 @@ class DiagnoseData:
         self.__pat_ide = None
         self.__enc_ide = None
         self.__diagnoses = None
+        self.__startdatetime = None
 
     def get_pat_ide(self):
         return self.__pat_ide
@@ -60,7 +61,13 @@ class DiagnoseData:
         self.__enc_ide = enc_ide
 
     def set_diagnoses(self, diagnoses):
-        self.__diagnoses = diagnoses
+        self.__diagnoses = diagnoses.split('; ')
+
+    def set_startdatetime(self, __startdatetime):
+        self.__startdatetime = __startdatetime
+
+    def get_startdate(self):
+        return self.__startdatetime
 
 
 class SingletonMeta(type):
@@ -100,6 +107,7 @@ class Logger(metaclass=SingletonMeta):
         self.invalid_cases = 0
         self.successful_insert = 0
         self.new_imported = 0
+        self.updated = 0
 
     def set_csv_encounters(self, csv_encounters):
         self.csv_encounters = csv_encounters
@@ -128,14 +136,16 @@ class Logger(metaclass=SingletonMeta):
     def get_new_imported(self):
         return self.new_imported
 
+    def increase_updated(self, num=1):
+        self.updated += num
+
     def get_updated(self):
-        _new_imported = self.get_new_imported()
-        return self.successful_insert - _new_imported
+        return self.updated
 
 
 class CSVReader(metaclass=SingletonMeta):
 
-    __seperator: str = '; '
+    __seperator: str = ';'
     __encoding: str = 'latin_1'
 
     def __init__(self):
@@ -183,8 +193,10 @@ class AktinImporter:
         """
         eid = EncounterIDHandler()
         pid = PatientIDHandler(eid)
-        icd = ICDHandler(pid)
-        return icd
+        sdtid = StartDateTimeHandler(pid)
+        icd = ICDHandler(sdtid)
+        sicd = ICDStartHandler(icd)
+        return sicd
 
     def import_csv(self, path_csv: str):
         """
@@ -212,7 +224,7 @@ class AktinImporter:
         conn.disconnect()
         print('Encounters: ' + str(self.__logger.get_csv_encounters()) + ', ' +
               'Valid: ' + str(self.__logger.get_csv_encounters() - self.__logger.get_invalid_cases()) + ', ' +
-              'Inserted: ' + str(self.__logger.get_db_insert()) + ', ' +
+              'Inserted Diagnoses: ' + str(self.__logger.get_db_insert()) + ', ' +
               'Updated: ' + str(self.__logger.get_updated()) + ', ' +
               'New imported: ' + str(self.__logger.get_new_imported())
               )
@@ -244,7 +256,10 @@ class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
         pass
 
     def _get_my_value_from_row(self, row: pd.Series) -> str:
-        return row[self._column_name].values[0]
+        val = row[self._column_name].values[0]
+        if pd.isna(val):
+            val = None
+        return val
 
 
 class EncounterIDHandler(PatientDataColumnHandler):
@@ -252,6 +267,8 @@ class EncounterIDHandler(PatientDataColumnHandler):
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
+        if val is None:
+            raise ValueError(f'{self.__class__.__name__}')
         enc_ide = self._helper.anonymize_enc(val)
         data.set_enc_ide(enc_ide)
         return data
@@ -262,6 +279,8 @@ class PatientIDHandler(PatientDataColumnHandler):
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
+        if val is None:
+            raise ValueError(f'{self.__class__.__name__}')
         pat_ide = self._helper.anonymize_pat(val)
         data.set_pat_ide(pat_ide)
         return data
@@ -271,8 +290,31 @@ class ICDHandler(PatientDataColumnHandler):
     _column_name = 'Entlassdiagnosen'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
-        val = self._get_my_value_from_row(row).split(',')
+        val = self._get_my_value_from_row(row)
+        if val is None:
+            raise ValueError(f'{self.__class__.__name__}')
         data.set_diagnoses(val)
+        return data
+
+
+class ICDStartHandler(PatientDataColumnHandler):
+    _column_name = 'Aufnahmediagnosen'
+
+    def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
+        val = self._get_my_value_from_row(row)
+        if val is not None:
+            data.set_diagnoses(val)
+        return data
+
+
+class StartDateTimeHandler(PatientDataColumnHandler):
+    _column_name = 'Aufnahmedatumuhrzeit'
+
+    def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
+        val = self._get_my_value_from_row(row)
+        if val is None:
+            raise ValueError(f'{self.__class__.__name__}')
+        data.set_startdatetime(val)
         return data
 
 
@@ -316,7 +358,7 @@ class Helper(metaclass=SingletonMeta):
 
     def hash_filename(self):
         filename = os.path.basename(__file__)
-        return self.__anonymize_composite(filename)
+        return self.__hash_composite(filename)
 
     @staticmethod
     def convert_date_to_i2b2_format(date: str) -> str:
@@ -332,12 +374,12 @@ class Helper(metaclass=SingletonMeta):
             raise ValueError()
 
     def anonymize_enc(self, ext) -> str:
-        return self.__anonymize(self.__enc_root, ext)
+        return self.__anonymize_id(self.__enc_root, ext)
 
     def anonymize_pat(self, ext) -> str:
-        return self.__anonymize(self.__pat_root, ext)
+        return self.__anonymize_id(self.__pat_root, ext)
 
-    def __anonymize_composite(self, composite: str):
+    def __hash_composite(self, composite: str):
         """
         Anonymizes a composite string.
 
@@ -349,10 +391,10 @@ class Helper(metaclass=SingletonMeta):
         alg.update(buffer)
         return base64.urlsafe_b64encode(alg.digest()).decode('UTF-8')
 
-    def __anonymize(self, root, ext) -> str:
+    def __anonymize_id(self, root, ext) -> str:
         composite = '/'.join([str(root), str(ext)])
         composite = self.__salt + composite if self.__salt else composite
-        return self.__anonymize_composite(composite)
+        return self.__hash_composite(composite)
 
 
 class DatabaseConnection(metaclass=SingletonMeta):
@@ -435,6 +477,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
     def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         removed_num = self._remove_observation_entry(enc_num)
         inserted_num = self._insert_observation_entry(enc_num, pat_num, entry)
+        self.__logger.increase_updated(removed_num)
         if removed_num < inserted_num:
             self.__logger.increase_new_imported(inserted_num-removed_num)
 
@@ -444,31 +487,24 @@ class ObservationFactEntryHandler(TableEntryHandler):
         encounter numbers :param:'enc_num' and different sourcesystem code.
         :param enc_num:
         """
-        count_query = (
-            db.select(self._table.c)
-            .where(
-                (self._table.c.encounter_num == enc_num) &
-                (self._table.c.sourcesystem_cd != os.environ['sourcesystem_cd'])
-            )
-        )
         query = (
             db.delete(self._table)
             .where(
                 (self._table.c.encounter_num == enc_num) &
                 (self._table.c.sourcesystem_cd != os.environ['sourcesystem_cd'])
-            )
+            ).returning(self._table.c.encounter_num)
         )
 
         try:
-            count = self._conn.execute(count_query)
-            self._conn.execute(query)
-            return len(count.fetchall())
+            result = self._conn.execute(query)
+            return len(result.fetchall())
         except db.exc.SQLAlchemyError:
             self._conn.rollback()
             print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
 
     def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         import_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        start_date = datetime.strptime(entry.get_startdate(), '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S.%f')
         _imported_num = 0
         for diagnose in entry.get_diagnoses():
             query = (
@@ -479,7 +515,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
                     concept_cd=diagnose,
                     sourcesystem_cd=os.environ['sourcesystem_cd'],
                     import_date=import_date,
-                    start_date=import_date,
+                    start_date=start_date,
                     provider_id='@',
                     modifier_cd='localisation'
                 )
@@ -489,7 +525,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 self.__logger.increase_db_insert()
                 _imported_num += 1
             except db.exc.SQLAlchemyError:
-                self._conn.rollback()
+                # self._conn.rollback()
                 print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
         return _imported_num
 
