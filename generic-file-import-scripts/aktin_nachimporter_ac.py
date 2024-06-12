@@ -29,6 +29,7 @@ import base64
 import hashlib
 import os
 import re
+
 import sqlalchemy as db
 from sqlalchemy.engine.base import Connection
 import pandas as pd
@@ -36,38 +37,55 @@ import pandas as pd
 
 class DiagnoseData:
     """
-    This class contains diagnostic data for updating the database.
+    This class contains diagnostic data of a patients treatment encounter in an emergency department.
     """
 
     def __init__(self):
-        self.__pat_ide = None
-        self.__enc_ide = None
-        self.__diagnoses = None
-        self.__startdatetime = None
+        # The two IDE values identify updatable records and insert information from the other attributes into them.
+        self.__pat_ide = None  # patient id from the csv encoded with sha1
+        self.__enc_ide = None  # encounter id from the csv encoded with sha1
+        self.__diagnoses = None  # string that contains a ';' seperated list of diagnoses
+        self.__start_date_time = None  # date and timestamp of encounter start (admission)
 
-    def get_pat_ide(self):
+    def is_valid(self):
+        """
+        Checks if this object is valid for updating the database. The object is valid if no attribute is 'None'.
+        :return:
+        """
+        for attr_name, attr_value in self.__dict__.items():
+            if attr_value is None:
+                return False
+        return True
+
+    def __str__(self):
+        summary = ''
+        for attr_name, attr_value in self.__dict__.items():
+            summary += f'{attr_name}: {attr_value}\n'
+        return summary
+
+    def get_pat_ide(self) -> str:
         return self.__pat_ide
 
-    def get_enc_ide(self):
+    def get_enc_ide(self) -> str:
         return self.__enc_ide
 
-    def get_diagnoses(self):
+    def get_diagnoses(self) -> str:
         return self.__diagnoses
 
-    def set_pat_ide(self, pat_ide):
+    def set_pat_ide(self, pat_ide: str):
         self.__pat_ide = pat_ide
 
-    def set_enc_ide(self, enc_ide):
+    def set_enc_ide(self, enc_ide: str):
         self.__enc_ide = enc_ide
 
-    def set_diagnoses(self, diagnoses):
-        self.__diagnoses = diagnoses.split('; ')
+    def set_diagnoses(self, diagnoses_raw: str):
+        self.__diagnoses = diagnoses_raw.split('; ')
 
-    def set_startdatetime(self, __startdatetime):
-        self.__startdatetime = __startdatetime
+    def set_start_datetime(self, start_datetime: str):
+        self.__start_date_time = start_datetime
 
-    def get_startdate(self):
-        return self.__startdatetime
+    def get_start_datetime(self) -> datetime:
+        return self.__start_date_time
 
 
 class SingletonMeta(type):
@@ -99,60 +117,60 @@ class SingletonABCMeta(ABCMeta):
 class Logger(metaclass=SingletonMeta):
     """
     This class provides logging for displaying the status of the update process. It displays the number of
-    encounters in the csv file, counts the number of updated encounter diagnoses, and counts the number of non-updatable
-    diagnoses because the encounter number doesn't exist in the database.
+    encounters in the csv file, -valid encounters, -encounters able to connect to the database, -imported diagnoses,
+    -how many of which are updated and additional (number of diagnoses exceeding the number of diagnoses prior to update)
     """
+
     def __init__(self):
-        self.csv_encounters = 0
-        self.invalid_cases = 0
-        self.successful_insert = 0
-        self.new_imported = 0
-        self.updated = 0
+        self.__csv_encounters = 0
+        self.__invalid_encounters = 0
+        self.__successful_insert = 0
+        self.__new_imported = 0
+        self.__updated = 0
 
-    def set_csv_encounters(self, csv_encounters):
-        self.csv_encounters = csv_encounters
+    def set_csv_encounters(self, csv_encounters: int):
+        self.__csv_encounters = csv_encounters
 
-    def increase_db_insert(self):
-        self.successful_insert += 1
+    def increase_connected_to_db(self):
+        self.__successful_insert += 1
 
-    def get_csv_encounters(self):
-        return self.csv_encounters
+    def get_num_of_csv_encounters(self) -> int:
+        return self.__csv_encounters
 
-    def get_db_insert(self):
-        return self.successful_insert
+    def get_successfully_inserted_encounters(self) -> int:
+        return self.__successful_insert
 
-    def increase_invalid(self):
-        self.invalid_cases += 1
+    def increase_invalid_csv_encounter_count(self):
+        self.__invalid_encounters += 1
 
-    def get_invalid_cases(self):
-        return self.invalid_cases
+    def get_invalid_csv_encounter_count(self) -> int:
+        return self.__invalid_encounters
 
-    def increase_new_imported(self, num=1):
-        self.new_imported += num
-
-    def decrease_new_imported(self):
-        self.new_imported -= 1
+    def increase_new_imported_diagnoses(self, num: int = 1):
+        self.__new_imported += num
 
     def get_new_imported(self):
-        return self.new_imported
+        return self.__new_imported
 
-    def increase_updated(self, num=1):
-        self.updated += num
+    def increase_removed_diagnoses(self, num=1):
+        self.__updated += num
 
     def get_updated(self):
-        return self.updated
+        return self.__updated
 
 
 class CSVReader(metaclass=SingletonMeta):
-
+    """
+    This class reads a csv file and functions as a python generator where each row can be yielded by the using method.
+    """
     __seperator: str = ';'
     __encoding: str = 'latin_1'
 
     def __init__(self):
         self.__path_csv = None
-        self.__logger = Logger()
+        self.logger = Logger()
 
-    def is_csv_file(self, file_path):
+    def is_csv_file(self, file_path: str) -> tuple[str, bool]:
         _, file_extension = os.path.splitext(file_path)
         return file_extension, file_extension.lower() == '.csv'
 
@@ -161,42 +179,48 @@ class CSVReader(metaclass=SingletonMeta):
         if is_csv:
             self.__path_csv = path_csv
         else:
-            raise Exception('Required CSV, got: ' + file_type)
+            raise InvalidFileTypeError('Required CSV, got: ' + file_type)
 
     def iter_rows(self):
         row_count = 0
         for row in pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str):
             row_count += 1
             yield row
-        self.__logger.set_csv_encounters(row_count)
+        self.logger.set_csv_encounters(row_count)
+
+
+class InvalidFileTypeError(Exception):
+    """
+    Exception raised for files of a different type as requested/needed.
+    """
+    def __init__(self, message="Invalid file type provided"):
+        self.message = message
+        super().__init__(self.message)
 
 
 class AktinImporter:
     """
-    This class implements the pipline for updating encounter data in the AKTIN Data Warehouse.
+    This class implements the pipeline for updating encounter data in the AKTIN Data Warehouse.
     The update result will be Logged at the end by :class:'Logger'.
     """
-
     def __init__(self):
         self.__reader = CSVReader()
-        self.__logger = Logger()
+        self.logger = Logger()
         self.__pipeline = self.__init_pipeline()
-        os.environ['sourcesystem_cd'] = ('gfi_' + os.environ['script_id']
-                                         + 'V' + os.environ['script_version']
-                                         + '_' + Helper().hash_filename()[:50])
 
     @staticmethod
     def __init_pipeline():
         """
         This method updates the data class :class:'DiagnoseData' by using the specified column handlers.
-        @:return
+        @:return _start_diagnoses: returns a DiagnoseData object that has been updated with diagnose data for one encounter.
+        @:return None: returns None if one of the attributes of DiagnoseData were not found in the CSV file
         """
-        eid = EncounterIDHandler()
-        pid = PatientIDHandler(eid)
-        sdtid = StartDateTimeHandler(pid)
-        icd = ICDHandler(sdtid)
-        sicd = ICDStartHandler(icd)
-        return sicd
+        _enc_id = EncounterIDHandler()
+        _pat_id = PatientIDHandler(_enc_id)
+        _date_time = StartDateTimeHandler(_pat_id)
+        _diagnoses = EndICDHandler(_date_time)
+        _start_diagnoses = StartICDHandler(_diagnoses)
+        return _start_diagnoses
 
     def import_csv(self, path_csv: str):
         """
@@ -214,20 +238,21 @@ class AktinImporter:
         for index, r in enumerate(self.__reader.iter_rows()):
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
-            if data:
+            if data.is_valid():
                 enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
                 pat_num = pat_map.get_patient_num_for_ide(data.get_pat_ide())
-                obs.update_entries(enc_num, pat_num, data)
+                obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
-                self.__logger.increase_invalid()
+                self.logger.increase_invalid_csv_encounter_count()
 
-        conn.disconnect()
-        print('Encounters: ' + str(self.__logger.get_csv_encounters()) + ', ' +
-              'Valid: ' + str(self.__logger.get_csv_encounters() - self.__logger.get_invalid_cases()) + ', ' +
-              'Inserted Diagnoses: ' + str(self.__logger.get_db_insert()) + ', ' +
-              'Updated: ' + str(self.__logger.get_updated()) + ', ' +
-              'New imported: ' + str(self.__logger.get_new_imported())
+        print('Fälle in Datei: ' + str(self.logger.get_num_of_csv_encounters()) + ',\n' +
+              'Valide Fälle: ' + str(self.logger.get_num_of_csv_encounters() - self.logger.get_invalid_csv_encounter_count()) + ',\n' +
+              'Verknüpfte Fälle: ' + str(self.logger.get_successfully_inserted_encounters()) + ',\n' +
+              'Importierte Diagnosen: ' + str(self.logger.get_new_imported()) + ',\n' +
+              'davon update: ' + str(self.logger.get_updated()) + ',\n' +
+              'davon neu: ' + str(self.logger.get_new_imported() - self.logger.get_updated())
               )
+        conn.disconnect()
 
 
 class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
@@ -239,17 +264,13 @@ class PatientDataColumnHandler(ABC, metaclass=SingletonABCMeta):
 
     def __init__(self, successor: 'PatientDataColumnHandler' = None):
         self.__successor = successor
-        self._helper = Helper()
+        self.helper = Helper()
 
-    def update_pat_from_row(self, data: DiagnoseData, row: pd.Series, index: str):
-        try:
-            data = self._process_column(data, row)
-            if self.__successor is not None:
-                return self.__successor.update_pat_from_row(data, row, index)
-            return data
-        except Exception:
-            print(f'{self.__class__.__name__}: Invalid patient in row {index}, ' + self.__successor._column_name)
-            return None
+    def update_pat_from_row(self, data: DiagnoseData, row: pd.Series, index: str) -> DiagnoseData:
+        data = self._process_column(data, row)
+        if self.__successor is not None:
+            return self.__successor.update_pat_from_row(data, row, index)
+        return data
 
     @abstractmethod
     def _process_column(self, pat: DiagnoseData, row: pd.Series) -> DiagnoseData:
@@ -267,9 +288,8 @@ class EncounterIDHandler(PatientDataColumnHandler):
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
-        if val is None:
-            raise ValueError(f'{self.__class__.__name__}')
-        enc_ide = self._helper.anonymize_enc(val)
+        enc_ide = self.helper.anonymize_enc(val) if val is not None else None
+
         data.set_enc_ide(enc_ide)
         return data
 
@@ -279,25 +299,35 @@ class PatientIDHandler(PatientDataColumnHandler):
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
-        if val is None:
-            raise ValueError(f'{self.__class__.__name__}')
-        pat_ide = self._helper.anonymize_pat(val)
+        pat_ide = self.helper.anonymize_pat(val) if val is not None else None
         data.set_pat_ide(pat_ide)
         return data
 
 
-class ICDHandler(PatientDataColumnHandler):
+class EndICDHandler(PatientDataColumnHandler):
+    """
+    This class supplements a DiagnoseData object with end diagnose from the row of the csv.
+    This diagnose represents diagnose information given at the end of a treatment.
+    Is necessary to differ between acute and stationary encounters in the csv. If the given row contains
+    a start diagnose, the StartICDHandler class will overwrite the end diagnose with the start diagnose.
+    """
     _column_name = 'Entlassdiagnosen'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
-        if val is None:
-            raise ValueError(f'{self.__class__.__name__}')
-        data.set_diagnoses(val)
+        if val is not None:
+            data.set_diagnoses(val)
         return data
 
 
-class ICDStartHandler(PatientDataColumnHandler):
+class StartICDHandler(PatientDataColumnHandler):
+    """
+        This class supplements a DiagnoseData object with start diagnose from the row of the csv.
+        This diagnose represents diagnose information given at the start of a treatment.
+        Is necessary to differ between acute and stationary encounters in the csv.
+        If there exists a start diagnose in the given row, this entry represents a acute case and this
+        diagnose will overwrite the end diagnose in the DiagnoseData object.
+        """
     _column_name = 'Aufnahmediagnosen'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
@@ -312,9 +342,13 @@ class StartDateTimeHandler(PatientDataColumnHandler):
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
-        if val is None:
-            raise ValueError(f'{self.__class__.__name__}')
-        data.set_startdatetime(val)
+        try:
+            _datetime = None if val is None else self.helper.convert_date_to_i2b2_format(val)
+        except ValueError:
+            _datetime = None
+
+        if _datetime is not None:
+            data.set_start_datetime(_datetime)
         return data
 
 
@@ -356,7 +390,7 @@ class Helper(metaclass=SingletonMeta):
                         return value.strip()
             return ''
 
-    def hash_filename(self):
+    def hash_filename(self) -> str:
         filename = os.path.basename(__file__)
         return self.__hash_composite(filename)
 
@@ -370,16 +404,22 @@ class Helper(metaclass=SingletonMeta):
             return datetime.strptime(date, '%Y%m%d%H%M').strftime('%Y-%m-%d %H:%M')
         elif len(date) == 14:
             return datetime.strptime(date, '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+        elif len(date) == 19:
+            # Try the german date format and if not try the english format
+            try:
+                return datetime.strptime(date, '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
         else:
             raise ValueError()
 
-    def anonymize_enc(self, ext) -> str:
+    def anonymize_enc(self, ext: str) -> str:
         return self.__anonymize_id(self.__enc_root, ext)
 
-    def anonymize_pat(self, ext) -> str:
+    def anonymize_pat(self, ext: str) -> str:
         return self.__anonymize_id(self.__pat_root, ext)
 
-    def __hash_composite(self, composite: str):
+    def __hash_composite(self, composite: str) -> str:
         """
         Anonymizes a composite string.
 
@@ -391,7 +431,7 @@ class Helper(metaclass=SingletonMeta):
         alg.update(buffer)
         return base64.urlsafe_b64encode(alg.digest()).decode('UTF-8')
 
-    def __anonymize_id(self, root, ext) -> str:
+    def __anonymize_id(self, root: str, ext: str) -> str:
         composite = '/'.join([str(root), str(ext)])
         composite = self.__salt + composite if self.__salt else composite
         return self.__hash_composite(composite)
@@ -405,6 +445,7 @@ class DatabaseConnection(metaclass=SingletonMeta):
     environment variables for username, password, and connection URL. It stores a connection and keeps
     it open until it is closed manually.
     """
+
     def __init__(self):
         self.__username = os.environ['username']
         self.__password = os.environ['password']
@@ -436,8 +477,9 @@ class TableEntryHandler(metaclass=SingletonABCMeta):
 
     def __init__(self, conn: Connection):
         self._conn = conn
+        self.helper = Helper()
         self._table = self.__reflect_table()
-        self.__logger = Logger()
+        self.logger = Logger()
 
     def __reflect_table(self) -> db.schema.Table:
         return db.Table(self._table_name, db.MetaData(), autoload_with=self._conn)
@@ -452,20 +494,23 @@ class ObservationFactEntryHandler(TableEntryHandler):
 
     def __init__(self, conn: Connection):
         super().__init__(conn)
-        self.__logger = Logger()
-        self.__script_id = os.environ['script_id']
-        os.environ['sourcesystem_cd'] = ('gfi_' + os.environ['script_id']
-                           + 'V' + os.environ['script_version']
-                           + '_' + Helper().hash_filename()[:50])
+        self._sourcesystem_cd = ('gfi_' + os.environ['script_id']
+                                 + 'V' + os.environ['script_version']
+                                 + '_' + Helper().hash_filename()[:50])
+        self._sourcesystem_sub = self._sourcesystem_cd.split('V')[0]
 
-    def update_entries(self, enc_num: int, pat_num: int, data: DiagnoseData):
+    def update_entries_if_exist(self, enc_num: int, pat_num: int, data: DiagnoseData):
         """
         Updates the database if the specified encounter in :param:'data' exists in the database
         :param enc_num
         :param pat_num
         :param data
         """
-        if self.__check_if_observation_exists(enc_num):
+
+        if (enc_num is not None
+                and pat_num is not None
+                and self.__check_if_observation_exists(enc_num)):
+            self.logger.increase_connected_to_db()
             self._update_table_entry(enc_num, pat_num, data)
 
     def __check_if_observation_exists(self, enc_num: int) -> bool:
@@ -475,13 +520,13 @@ class ObservationFactEntryHandler(TableEntryHandler):
         return result is not None
 
     def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
-        removed_num = self._remove_observation_entry(enc_num)
-        inserted_num = self._insert_observation_entry(enc_num, pat_num, entry)
-        self.__logger.increase_updated(removed_num)
-        if removed_num < inserted_num:
-            self.__logger.increase_new_imported(inserted_num-removed_num)
+        count_removed_diagnoses = self._remove_observation_entry(enc_num)
+        self.logger.increase_removed_diagnoses(count_removed_diagnoses)
 
-    def _remove_observation_entry(self, enc_num: int):
+        count_inserted_diagnoses = self._insert_observation_entry(enc_num, pat_num, entry)
+        self.logger.increase_new_imported_diagnoses(count_inserted_diagnoses)
+
+    def _remove_observation_entry(self, enc_num: int) -> int:
         """
         Removes the observation fact entries from the database with matching
         encounter numbers :param:'enc_num' and different sourcesystem code.
@@ -491,20 +536,20 @@ class ObservationFactEntryHandler(TableEntryHandler):
             db.delete(self._table)
             .where(
                 (self._table.c.encounter_num == enc_num) &
-                (self._table.c.sourcesystem_cd != os.environ['sourcesystem_cd'])
+                (self._table.c.sourcesystem_cd.like(f'{self._sourcesystem_sub}%'))
             ).returning(self._table.c.encounter_num)
         )
 
         try:
             result = self._conn.execute(query)
-            return len(result.fetchall())
+            deleted = len(result.fetchall())
+            return deleted
         except db.exc.SQLAlchemyError:
             self._conn.rollback()
             print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
 
-    def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
-        import_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        start_date = datetime.strptime(entry.get_startdate(), '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S.%f')
+    def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData) -> int:
+        import_date = self.helper.convert_date_to_i2b2_format(str(datetime.now())[0:19])
         _imported_num = 0
         for diagnose in entry.get_diagnoses():
             query = (
@@ -512,21 +557,24 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 .values(
                     encounter_num=enc_num,
                     patient_num=pat_num,
-                    concept_cd=diagnose,
-                    sourcesystem_cd=os.environ['sourcesystem_cd'],
+                    concept_cd=f'ICD10GM:{diagnose}',
+                    sourcesystem_cd=self._sourcesystem_cd,
                     import_date=import_date,
-                    start_date=start_date,
+                    start_date=entry.get_start_datetime(),
                     provider_id='@',
-                    modifier_cd='localisation'
+                    modifier_cd='@'
                 )
             )
             try:
                 self._conn.execute(query)
-                self.__logger.increase_db_insert()
                 _imported_num += 1
+
             except db.exc.SQLAlchemyError:
-                # self._conn.rollback()
-                print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
+                self._conn.rollback()
+                duplicate_entry_error_msg = 'psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint'
+                if not (traceback.format_exc().__contains__(duplicate_entry_error_msg)):
+                    print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
+
         return _imported_num
 
 
@@ -536,7 +584,7 @@ class EncounterMappingEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
 
-    def get_encounter_num_for_ide(self, enc_ide: str):
+    def get_encounter_num_for_ide(self, enc_ide: str) -> int:
         query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide).where(
             self._table.c.encounter_ide == enc_ide)
         result = self._conn.execute(query).fetchone()
@@ -549,7 +597,7 @@ class PatientMappingEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
 
-    def get_patient_num_for_ide(self, pat_ide: str):
+    def get_patient_num_for_ide(self, pat_ide: str) -> int:
         query = db.select(self._table.c.patient_num).where(self._table.c.patient_ide == pat_ide)
         result = self._conn.execute(query).fetchone()
         return result[0] if result else None
