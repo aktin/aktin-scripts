@@ -46,11 +46,11 @@ class DiagnoseData:
         self.__enc_ide = None  # encounter id from the csv encoded with sha1
         self.__diagnoses = None  # string that contains a ';' seperated list of diagnoses
         self.__start_date_time = None  # date and timestamp of encounter start (admission)
+        self.__start_diagnose = None
 
     def is_valid(self):
         """
         Checks if this object is valid for updating the database. The object is valid if no attribute is 'None'.
-        :return:
         """
         for attr_name, attr_value in self.__dict__.items():
             if attr_value is None:
@@ -66,26 +66,37 @@ class DiagnoseData:
     def get_pat_ide(self) -> str:
         return self.__pat_ide
 
-    def get_enc_ide(self) -> str:
-        return self.__enc_ide
-
-    def get_diagnoses(self) -> str:
-        return self.__diagnoses
-
     def set_pat_ide(self, pat_ide: str):
         self.__pat_ide = pat_ide
+
+    def get_enc_ide(self) -> str:
+        return self.__enc_ide
 
     def set_enc_ide(self, enc_ide: str):
         self.__enc_ide = enc_ide
 
-    def set_diagnoses(self, diagnoses_raw: str):
-        self.__diagnoses = diagnoses_raw.split('; ')
+    def get_diagnoses(self) -> str:
+        return self.__diagnoses
 
-    def set_start_datetime(self, start_datetime: str):
-        self.__start_date_time = start_datetime
+    def set_diagnoses(self, diagnoses_raw: str, is_start_diagnose: bool):
+        if is_start_diagnose:
+            self.set_start_diagnose(is_start_diagnose)
+            self.__diagnoses = diagnoses_raw.split('; ')
+        elif self.__start_diagnose is None:
+            self.set_start_diagnose(False)
+            self.__diagnoses = diagnoses_raw.split('; ')
 
     def get_start_datetime(self) -> datetime:
         return self.__start_date_time
+
+    def set_start_datetime(self, start_datetime: datetime):
+        self.__start_date_time = start_datetime
+
+    def get_start_diagnose(self):
+        return self.__start_diagnose
+
+    def set_start_diagnose(self, is_start_diagnose: bool):
+        self.__start_diagnose = is_start_diagnose
 
 
 class SingletonMeta(type):
@@ -122,37 +133,37 @@ class Logger(metaclass=SingletonMeta):
     """
 
     def __init__(self):
-        self.__csv_encounters = 0
-        self.__invalid_encounters = 0
-        self.__successful_insert = 0
-        self.__new_imported = 0
-        self.__updated = 0
+        self.__csv_encounters = 0   # num of rows in csv
+        self.__invalid_encounters = 0   # num of rows not mappable/insufficient to Diagnose data
+        self.__connected_to_db = 0  # num of rows with matching encounter and patient ids in db
+        self.__new_imported = 0 # number of new imported encounters from csv
+        self.__updated = 0  # number of updated encounters from csv
 
     def set_csv_encounters(self, csv_encounters: int):
         self.__csv_encounters = csv_encounters
 
-    def increase_connected_to_db(self):
-        self.__successful_insert += 1
-
-    def get_num_of_csv_encounters(self) -> int:
+    def get_csv_encounters(self) -> int:
         return self.__csv_encounters
 
-    def get_successfully_inserted_encounters(self) -> int:
-        return self.__successful_insert
+    def increase_connected_to_db(self):
+        self.__connected_to_db += 1
 
-    def increase_invalid_csv_encounter_count(self):
+    def get_connected_to_db(self) -> int:
+        return self.__connected_to_db
+
+    def increase_invalid_encounters(self):
         self.__invalid_encounters += 1
 
-    def get_invalid_csv_encounter_count(self) -> int:
+    def get_invalid_encounters(self) -> int:
         return self.__invalid_encounters
 
-    def increase_new_imported_diagnoses(self, num: int = 1):
+    def increase_new_imported(self, num: int = 1):
         self.__new_imported += num
 
     def get_new_imported(self):
         return self.__new_imported
 
-    def increase_removed_diagnoses(self, num=1):
+    def increase_updated(self, num=1):
         self.__updated += num
 
     def get_updated(self):
@@ -179,7 +190,7 @@ class CSVReader(metaclass=SingletonMeta):
         if is_csv:
             self.__path_csv = path_csv
         else:
-            raise InvalidFileTypeError('Required CSV, got: ' + file_type)
+            raise TypeError('Required CSV, got: ' + file_type)
 
     def iter_rows(self):
         row_count = 0
@@ -187,15 +198,6 @@ class CSVReader(metaclass=SingletonMeta):
             row_count += 1
             yield row
         self.logger.set_csv_encounters(row_count)
-
-
-class InvalidFileTypeError(Exception):
-    """
-    Exception raised for files of a different type as requested/needed.
-    """
-    def __init__(self, message="Invalid file type provided"):
-        self.message = message
-        super().__init__(self.message)
 
 
 class AktinImporter:
@@ -238,16 +240,17 @@ class AktinImporter:
         for index, r in enumerate(self.__reader.iter_rows()):
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
+
             if data.is_valid():
                 enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
                 pat_num = pat_map.get_patient_num_for_ide(data.get_pat_ide())
                 obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
-                self.logger.increase_invalid_csv_encounter_count()
+                self.logger.increase_invalid_encounters()
 
-        print('Fälle in Datei: ' + str(self.logger.get_num_of_csv_encounters()) + ',\n' +
-              'Valide Fälle: ' + str(self.logger.get_num_of_csv_encounters() - self.logger.get_invalid_csv_encounter_count()) + ',\n' +
-              'Verknüpfte Fälle: ' + str(self.logger.get_successfully_inserted_encounters()) + ',\n' +
+        print('Fälle in Datei: ' + str(self.logger.get_csv_encounters()) + ',\n' +
+              'Valide Fälle: ' + str(self.logger.get_csv_encounters() - self.logger.get_invalid_encounters()) + ',\n' +
+              'Verknüpfte Fälle: ' + str(self.logger.get_connected_to_db()) + ',\n' +
               'Importierte Diagnosen: ' + str(self.logger.get_new_imported()) + ',\n' +
               'davon update: ' + str(self.logger.get_updated()) + ',\n' +
               'davon neu: ' + str(self.logger.get_new_imported() - self.logger.get_updated())
@@ -316,7 +319,7 @@ class EndICDHandler(PatientDataColumnHandler):
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
         if val is not None:
-            data.set_diagnoses(val)
+            data.set_diagnoses(val, is_start_diagnose=False)
         return data
 
 
@@ -333,7 +336,7 @@ class StartICDHandler(PatientDataColumnHandler):
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
         if val is not None:
-            data.set_diagnoses(val)
+            data.set_diagnoses(val, is_start_diagnose=True)
         return data
 
 
@@ -405,11 +408,7 @@ class Helper(metaclass=SingletonMeta):
         elif len(date) == 14:
             return datetime.strptime(date, '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
         elif len(date) == 19:
-            # Try the german date format and if not try the english format
-            try:
-                return datetime.strptime(date, '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                return datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+            return datetime.strptime(date, '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
         else:
             raise ValueError()
 
@@ -511,7 +510,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 and pat_num is not None
                 and self.__check_if_observation_exists(enc_num)):
             self.logger.increase_connected_to_db()
-            self._update_table_entry(enc_num, pat_num, data)
+            self.__update_table_entry(enc_num, pat_num, data)
 
     def __check_if_observation_exists(self, enc_num: int) -> bool:
         query = db.select(self._table.c.encounter_num).where(
@@ -519,12 +518,12 @@ class ObservationFactEntryHandler(TableEntryHandler):
         result = self._conn.execute(query).fetchone()
         return result is not None
 
-    def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
+    def __update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         count_removed_diagnoses = self._remove_observation_entry(enc_num)
-        self.logger.increase_removed_diagnoses(count_removed_diagnoses)
+        self.logger.increase_updated(count_removed_diagnoses)
 
         count_inserted_diagnoses = self._insert_observation_entry(enc_num, pat_num, entry)
-        self.logger.increase_new_imported_diagnoses(count_inserted_diagnoses)
+        self.logger.increase_new_imported(count_inserted_diagnoses)
 
     def _remove_observation_entry(self, enc_num: int) -> int:
         """
@@ -549,7 +548,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
             print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
 
     def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData) -> int:
-        import_date = self.helper.convert_date_to_i2b2_format(str(datetime.now())[0:19])
+        import_date = self.helper.convert_date_to_i2b2_format(str(datetime.now().strftime('%d.%m.%Y %H:%M:%S'))[0:19])
         _imported_num = 0
         for diagnose in entry.get_diagnoses():
             query = (
@@ -566,11 +565,11 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 )
             )
             try:
-                self._conn.execute(query)
+                with self._conn.begin():
+                    self._conn.execute(query)
                 _imported_num += 1
 
             except db.exc.SQLAlchemyError:
-                self._conn.rollback()
                 duplicate_entry_error_msg = 'psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint'
                 if not (traceback.format_exc().__contains__(duplicate_entry_error_msg)):
                     print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
