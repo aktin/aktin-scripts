@@ -121,11 +121,11 @@ class Logger(metaclass=SingletonMeta):
     """
 
     def __init__(self):
-        self.__csv_encounters = 0
-        self.__invalid_encounters = 0
-        self.__successful_insert = 0
-        self.__new_imported = 0
-        self.__updated = 0
+        self.__csv_encounters = 0  # num of rows in csv
+        self.__invalid_encounters = 0  # num of rows not mappable/insufficient to Diagnose data
+        self.__successful_insert = 0  # num of rows with matching encounter and patient ids in db
+        self.__new_imported = 0  # number of new imported encounters from csv
+        self.__updated = 0  # number of updated encounters from csv
 
     def get_csv_encounters(self) -> int:
         return self.__csv_encounters
@@ -230,7 +230,7 @@ class AktinImporter:
                 obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
                 self.__logger.increase_invalid_count()
-        self.__logger.set_csv_encounters(index - 1) # TODO gegenprüfen
+        self.__logger.set_csv_encounters(index + 1)
 
         print('Fälle in Datei: ' + str(self.__logger.get_csv_encounters()) + ',\n' +
               'Valide Fälle: ' + str(self.__logger.get_csv_encounters() - self.__logger.get_invalid_count()) + ',\n' +
@@ -293,7 +293,8 @@ class PatientIDHandler(PatientDataColumnHandler):
 class EndICDHandler(PatientDataColumnHandler):
     """
     This class supplements a DiagnoseData object with end diagnose (at the end of the treatment) from the row of the csv.
-    TODO kommantar das Startdiagnose gegenüber Enddiagnosen vorrangig sind -> Hinweis was in de rImport klasse passiert
+    The end diagnose will be extracted first, and after that the start diagnose will be extracted and replaces the end
+    diagnose, if a start diagnose exists, because the start diagnose is superior than the end diagnose.
     """
     _column_name = 'Entlassdiagnosen'
 
@@ -307,10 +308,8 @@ class EndICDHandler(PatientDataColumnHandler):
 class StartICDHandler(PatientDataColumnHandler):
     """
         This class supplements a DiagnoseData object with start diagnose (at the start of treatment) from the row of the csv.
-        # TODO rephrase
-        Is necessary to differ between acute and stationary encounters in the csv.
-        If there exists a start diagnose in the given row, this entry represents a acute case and this
-        diagnose will overwrite the end diagnose in the DiagnoseData object.
+        This handler has to be executed after the EndICDHandler and if a start diagnose exists, overwrites the end diagnose
+        in DiagnoseData with start diagnose.
         """
     _column_name = 'Aufnahmediagnosen'
 
@@ -390,7 +389,7 @@ class Helper(metaclass=SingletonMeta):
         elif len(date) == 19:
             return datetime.strptime(date, '%d.%m.%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
         else:
-            raise ValueError() # TODO descriptive message -> Fehler beim konvertieren von datum string in i2b2 format
+            raise ValueError(f'Error while converting date to i2b2 format: {date}')
 
     def anonymize_enc(self, ext: str) -> str:
         return self.__anonymize_id(self.__enc_root, ext)
@@ -474,20 +473,20 @@ class ObservationFactEntryHandler(TableEntryHandler):
         super().__init__(conn)
         self._sourcesystem_cd = ('gfi_' + os.environ['script_id']
                                  + 'V' + os.environ['script_version']
-                                 + '_' + Helper().hash_this_filename()[:50]) # TODO check if size is static
+                                 + '_' + Helper().hash_this_filename())
         self._sourcesystem_sub = self._sourcesystem_cd.split('V')[0]
 
     def update_entries_if_exist(self, enc_num: int, pat_num: int, data: DiagnoseData):
         """
         Updates the database if the specified encounter in :param:'data' exists in the database
-        :param enc_num TODO add description
-        :param pat_num
-        :param data
+        :param enc_num, database intern id for a specific encounter
+        :param pat_num, database intern id for a specific patient
+        :param data, DiagnoseData object for updating the database
         """
         if (enc_num is not None
                 and pat_num is not None
                 and self.__check_if_observation_exists(enc_num)):
-            self.logger.increase_connected_to_db()
+            self._logger.increase_successful_inserts()
             self._update_table_entry(enc_num, pat_num, data)
 
     # TODO: make more performant by making one SQL fetch and comparing lists of all encounters
@@ -499,16 +498,16 @@ class ObservationFactEntryHandler(TableEntryHandler):
 
     def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         count_removed_diagnoses = self._remove_observation_entry(enc_num)
-        self.logger.increase_removed_diagnoses(count_removed_diagnoses)
+        self._logger.increase_updated_diagnoses_count(count_removed_diagnoses)
 
         count_inserted_diagnoses = self._insert_observation_entry(enc_num, pat_num, entry)
-        self.logger.increase_new_imported_diagnoses(count_inserted_diagnoses)
+        self._logger.increase_imported_diagnoses_count(count_inserted_diagnoses)
 
     def _remove_observation_entry(self, enc_num: int) -> int:
         """
         Removes the observation fact entries from the database with matching
         encounter numbers :param:'enc_num' and different sourcesystem code.
-        :param enc_num: #TODO description
+        :param enc_num: id referencing one encounter in the database
         """
         query = (
             db.delete(self._table)
@@ -525,9 +524,21 @@ class ObservationFactEntryHandler(TableEntryHandler):
             self._conn.rollback()
             print(f'Remove operation to {self._table} failed: {traceback.format_exc()}')
 
-    #TODO Docs
     def _insert_observation_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData) -> int:
-        import_date = self._helper.convert_date_to_i2b2_format(str(datetime.now())[:19])
+        """
+            Inserts observation entries into the database table for a given patient and encounter.
+
+            This method takes an encounter number, a patient number, and a DiagnoseData entry, and inserts
+            one or more diagnoses associated with the entry into the specified database table. It returns
+            the number of successfully inserted diagnoses.
+            enc_num (int): The encounter number associated with the observation entry.
+            pat_num (int): The patient number associated with the observation entry.
+            entry (DiagnoseData): An instance of DiagnoseData containing diagnosis information to be inserted.
+
+           Returns:
+               int: The number of diagnoses successfully inserted into the database table.
+           """
+        import_date = self._helper.convert_date_to_i2b2_format(str(datetime.now().strftime('%d.%m.%Y %H:%M:%S'))[0:19])
         imported_num = 0
         for diagnose in entry.get_diagnoses():
             query = (
