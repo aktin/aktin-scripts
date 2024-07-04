@@ -87,6 +87,7 @@ class DiagnoseData:
     def set_start_datetime(self, start_datetime: str):
         self.__start_date_time = start_datetime
 
+
 class SingletonMeta(type):
     """
     Metaclass that implements the Singleton design pattern.
@@ -115,9 +116,14 @@ class SingletonABCMeta(ABCMeta):
 
 class Logger(metaclass=SingletonMeta):
     """
-    This class provides logging for displaying the status of the update process. It displays the number of
-    encounters in the csv file, -valid encounters, -encounters able to connect to the database, -imported diagnoses,
-    -how many of which are updated and additional (number of diagnoses exceeding the number of diagnoses prior to update)
+    This class provides logging for displaying the status of the update process. It displays:
+    1. The number of encounters in the CSV file,
+    2. Valid encounters,
+    3. Encounters able to connect to the database,
+    4. Imported diagnoses,
+    5. How many of which are:
+       a. Updated, and
+       b. Newly imported.
     """
 
     def __init__(self):
@@ -197,9 +203,16 @@ class AktinImporter:
     @staticmethod
     def __init_pipeline():
         """
-        This method updates the data class :class:'DiagnoseData' by using the specified column handlers.
-        @:return _start_diagnoses: returns a DiagnoseData object that has been updated with diagnose data for one encounter.
-        @:return None: returns None if one of the attributes of DiagnoseData were not found in the CSV file
+        Initializes a sequence of handlers, where each handler takes the
+        previous one as a parameter. The sequence is as follows:
+        - EncounterIDHandler
+        - PatientIDHandler
+        - StartDateTimeHandler
+        - EndICDHandler
+        - StartICDHandler
+        
+        Returns:
+            StartICDHandler: The starting handler in the chain.
         """
         enc_id = EncounterIDHandler()
         pat_id = PatientIDHandler(enc_id)
@@ -210,9 +223,19 @@ class AktinImporter:
 
     def import_csv(self, path_csv: str):
         """
-        This method reads data from a CSV file located at the specified path and updates the database on that basis.
-        It utilizes various handlers to interact with the tables of the database.
-        @:param path_csv: Path to the CSV file
+        Imports data from a CSV file and updates the database accordingly.
+
+        This method reads data from a specified CSV file, processes each row to
+        update patient and encounter information, and logs the results. The
+        sequence of operations includes:
+        - Establishing a database connection.
+        - Setting the path for the CSV reader.
+        - Iterating over the rows in the CSV file.
+        - Processing each row to update patient and encounter data.
+        - Logging the import results.
+
+        Args:
+            path_csv (str): The file path to the CSV file to be imported.
         """
         conn = DatabaseConnection()
         connection = conn.connect()
@@ -307,10 +330,10 @@ class EndICDHandler(PatientDataColumnHandler):
 
 class StartICDHandler(PatientDataColumnHandler):
     """
-        This class supplements a DiagnoseData object with start diagnose (at the start of treatment) from the row of the csv.
-        This handler has to be executed after the EndICDHandler and if a start diagnose exists, overwrites the end diagnose
-        in DiagnoseData with start diagnose.
-        """
+    This class supplements a DiagnoseData object with start diagnose (at the start of treatment) from the row of the csv.
+    This handler has to be executed after the EndICDHandler and if a start diagnose exists, overwrites the end diagnose
+    in DiagnoseData with start diagnose.
+    """
     _column_name = 'Aufnahmediagnosen'
 
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
@@ -472,8 +495,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
         self._sourcesystem_cd = ('gfi_' + os.environ['script_id']
-                                 + 'V' + os.environ['script_version']
-                                 + '_' + Helper().hash_this_filename())
+                                 + 'V' + os.environ['script_version'])
         self._sourcesystem_sub = self._sourcesystem_cd.split('V')[0]
 
     def update_entries_if_exist(self, enc_num: int, pat_num: int, data: DiagnoseData):
@@ -499,7 +521,6 @@ class ObservationFactEntryHandler(TableEntryHandler):
     def _update_table_entry(self, enc_num: int, pat_num: int, entry: DiagnoseData):
         count_removed_diagnoses = self._remove_observation_entry(enc_num)
         self._logger.increase_updated_diagnoses_count(count_removed_diagnoses)
-
         count_inserted_diagnoses = self._insert_observation_entry(enc_num, pat_num, entry)
         self._logger.increase_imported_diagnoses_count(count_inserted_diagnoses)
 
@@ -556,6 +577,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
             )
             try:
                 self._conn.execute(query)
+                self._conn.commit()
                 imported_num += 1
             except db.exc.SQLAlchemyError:
                 self._conn.rollback()
