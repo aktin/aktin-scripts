@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*
 # Created on Fr Apr 12 13:48:00 2024
-# @VERSION=1.0.0
+# @VERSION=1.0.1
 # @VIEWNAME=AKTIN-Nachimporter-AC
 # @MIMETYPE=csv
 # @ID=anac
@@ -42,7 +42,6 @@ class DiagnoseData:
 
     def __init__(self):
         # The two IDE values identify updatable records and insert information from the other attributes into them.
-        self.__pat_ide = None  # patient id from the csv encoded with sha1
         self.__enc_ide = None  # encounter id from the csv encoded with sha1
         self.__diagnoses = None  # string that contains a ';' seperated list of diagnoses
         self.__start_date_time = None  # date and timestamp of encounter start (admission)
@@ -62,12 +61,6 @@ class DiagnoseData:
         for attr_name, attr_value in self.__dict__.items():
             summary += f'{attr_name}: {attr_value}\n'
         return summary
-
-    def get_pat_ide(self) -> str:
-        return self.__pat_ide
-
-    def set_pat_ide(self, pat_ide: str):
-        self.__pat_ide = pat_ide
 
     def get_enc_ide(self) -> str:
         return self.__enc_ide
@@ -215,8 +208,7 @@ class AktinImporter:
             StartICDHandler: The starting handler in the chain.
         """
         enc_id = EncounterIDHandler()
-        pat_id = PatientIDHandler(enc_id)
-        date_time = StartDateTimeHandler(pat_id)
+        date_time = StartDateTimeHandler(enc_id)
         end_diagnoses = EndICDHandler(date_time)
         start_diagnoses = StartICDHandler(end_diagnoses)
         return start_diagnoses
@@ -248,8 +240,8 @@ class AktinImporter:
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
             if data.is_valid():
-                enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
-                pat_num = pat_map.get_patient_num_for_ide(data.get_pat_ide())
+                enc_num, pat_ide = enc_map.get_enc_num_and_pat_ide_for_ide(data.get_enc_ide())
+                pat_num = pat_map.get_pat_num_for_ide(pat_ide)
                 obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
                 self.__logger.increase_invalid_count()
@@ -300,16 +292,6 @@ class EncounterIDHandler(PatientDataColumnHandler):
         val = self._get_my_value_from_row(row)
         enc_ide = self._helper.anonymize_enc(val) if val is not None else None
         data.set_enc_ide(enc_ide)
-        return data
-
-
-class PatientIDHandler(PatientDataColumnHandler):
-    _column_name = 'Patientennummer'
-
-    def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
-        val = self._get_my_value_from_row(row)
-        pat_ide = self._helper.anonymize_pat(val) if val is not None else None
-        data.set_pat_ide(pat_ide)
         return data
 
 
@@ -591,11 +573,11 @@ class EncounterMappingEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
 
-    def get_encounter_num_for_ide(self, enc_ide: str) -> int:
-        query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide).where(
+    def get_enc_num_and_pat_ide_for_ide(self, enc_ide: str) -> tuple[int, str]:
+        query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide, self._table.c.patient_ide).where(
             self._table.c.encounter_ide == enc_ide)
         result = self._conn.execute(query).fetchone()
-        return result[0] if result else None
+        return (result[0], result[2]) if result else (None, None)
 
 
 class PatientMappingEntryHandler(TableEntryHandler):
@@ -604,7 +586,7 @@ class PatientMappingEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
 
-    def get_patient_num_for_ide(self, pat_ide: str) -> int:
+    def get_pat_num_for_ide(self, pat_ide: str) -> int:
         query = db.select(self._table.c.patient_num).where(self._table.c.patient_ide == pat_ide)
         result = self._conn.execute(query).fetchone()
         return result[0] if result else None
