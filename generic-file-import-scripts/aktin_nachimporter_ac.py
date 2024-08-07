@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*
 # Created on Fr Apr 12 13:48:00 2024
-# @VERSION=1.0.1
+# @VERSION=1.0.2
 # @VIEWNAME=AKTIN-Nachimporter-AC
 # @MIMETYPE=csv
 # @ID=anac
@@ -552,6 +552,8 @@ class ObservationFactEntryHandler(TableEntryHandler):
                     concept_cd=f'ICD10GM:{diagnose}',
                     sourcesystem_cd=self._sourcesystem_cd,
                     import_date=import_date,
+                    download_date=import_date,
+                    update_date=import_date,
                     start_date=entry.get_start_datetime(),
                     provider_id='@',
                     modifier_cd='@'
