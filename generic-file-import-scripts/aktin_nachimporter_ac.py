@@ -609,6 +609,8 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 concept_cd=f'ICD10GM:{diagnose}',
                 sourcesystem_cd=self._sourcesystem_cd,
                 import_date=import_date,
+                download_date=import_date,
+                update_date=import_date,
                 start_date=entry.get_start_datetime(),
                 provider_id='@',
                 modifier_cd=_modifier
