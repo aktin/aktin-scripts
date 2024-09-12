@@ -42,12 +42,11 @@ class DiagnoseData:
 
     def __init__(self):
         # The two IDE values identify updatable records and insert information from the other attributes into them.
-        self.__pat_ide = None  # patient id from the csv encoded with sha1
         self.__enc_ide = None  # encounter id from the csv encoded with sha1
         self.__diagnoses = None  # string that contains a ';' seperated list of diagnoses
         self.__start_date_time = None  # date and timestamp of encounter start (admission)
-        self.__start_diagnose = None
-        self.__main_diagnose = None
+        self.__start_diagnose = None    # binary value, that distinguishes diagnoses by False - diagnoses are end diagnoses and being taken from an emergency department dataset, True - diagnoses are start diagnose, taken from inpatient setting
+        self.__main_diagnose = None # the diagnose that is mainly responsible for the hospital or emergency department stay
 
     def is_valid(self):
         """
@@ -64,12 +63,6 @@ class DiagnoseData:
             summary += f'{attr_name}: {attr_value}\n'
         return summary
 
-    def get_pat_ide(self) -> str:
-        return self.__pat_ide
-
-    def set_pat_ide(self, pat_ide: str):
-        self.__pat_ide = pat_ide
-
     def get_enc_ide(self) -> str:
         return self.__enc_ide
 
@@ -82,10 +75,9 @@ class DiagnoseData:
     def set_diagnoses(self, diagnoses_raw: str, is_start_diagnose: bool):
         if is_start_diagnose:
             self.set_start_diagnose(is_start_diagnose)
-            self.__diagnoses = diagnoses_raw.split('; ')
         elif self.__start_diagnose is None:
             self.set_start_diagnose(False)
-            self.__diagnoses = diagnoses_raw.split('; ')
+        self.__diagnoses = diagnoses_raw.split('; ')
         self.set_main_diagnose(self.__diagnoses[0])
 
     def get_start_datetime(self) -> datetime:
@@ -192,7 +184,6 @@ class CSVReader(metaclass=SingletonMeta):
 
     def __init__(self):
         self.__path_csv = None
-        self._logger = Logger()
 
     def is_csv_file(self, file_path: str) -> tuple[str, bool]:
         _, file_extension = os.path.splitext(file_path)
@@ -206,11 +197,9 @@ class CSVReader(metaclass=SingletonMeta):
             raise TypeError('Required CSV, got: ' + file_type)
 
     def iter_rows(self):
-        row_count = 0
-        for row in pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str):
-            row_count += 1
-            yield row
-        self._logger.set_csv_encounters(row_count)
+        for index, row in enumerate(
+                pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str)):
+            yield index, row
 
 
 class AktinImporter:
@@ -221,7 +210,7 @@ class AktinImporter:
 
     def __init__(self):
         self.__reader = CSVReader()
-        self.logger = Logger()
+        self.__logger = Logger()
         self.__pipeline = self.__init_pipeline()
 
     @staticmethod
@@ -238,12 +227,11 @@ class AktinImporter:
         Returns:
             StartICDHandler: The starting handler in the chain.
         """
-        _enc_id = EncounterIDHandler()
-        _pat_id = PatientIDHandler(_enc_id)
-        _date_time = StartDateTimeHandler(_pat_id)
-        _diagnoses = EndICDHandler(_date_time)
-        _start_diagnoses = StartICDHandler(_diagnoses)
-        return _start_diagnoses
+        enc_id = EncounterIDHandler()
+        date_time = StartDateTimeHandler(enc_id)
+        diagnoses = EndICDHandler(date_time)
+        start_diagnoses = StartICDHandler(diagnoses)
+        return start_diagnoses
 
     def import_csv(self, path_csv: str):
         """
@@ -263,28 +251,28 @@ class AktinImporter:
         """
         conn = DatabaseConnection()
         connection = conn.connect()
-        pat_map = PatientMappingEntryHandler(connection)
         enc_map = EncounterMappingEntryHandler(connection)
         obs = ObservationFactEntryHandler(connection)
         self.__reader.set_csv_path(path_csv)
 
-        for index, r in enumerate(self.__reader.iter_rows()):
+        for index, r in self.__reader.iter_rows():
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
 
             if data.is_valid():
                 enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
-                pat_num = pat_map.get_patient_num_for_ide(data.get_pat_ide())
+                pat_num = obs.get_patient_num_by_enc_num(enc_num)
                 obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
-                self.logger.increase_invalid_count()
+                self.__logger.increase_invalid_count()
+        self.__logger.set_csv_encounters(index + 1)
 
-        print('Fälle in Datei: ' + str(self.logger.get_csv_encounters()) + ',\n' +
-              'Valide Fälle: ' + str(self.logger.get_csv_encounters() - self.logger.get_invalid_count()) + ',\n' +
-              'Verknüpfte Fälle: ' + str(self.logger.get_successful_inserts()) + ',\n' +
-              'Importierte Diagnosen: ' + str(self.logger.get_imported_diagnoses_count()) + ',\n' +
-              'davon update: ' + str(self.logger.get_updated_diagnoses_count()) + ',\n' +
-              'davon neu: ' + str(self.logger.get_imported_diagnoses_count() - self.logger.get_updated_diagnoses_count())
+        print('Fälle in Datei: ' + str(self.__logger.get_csv_encounters()) + ',\n' +
+              'Valide Fälle: ' + str(self.__logger.get_csv_encounters() - self.__logger.get_invalid_count()) + ',\n' +
+              'Verknüpfte Fälle: ' + str(self.__logger.get_successful_inserts()) + ',\n' +
+              'Importierte Diagnosen: ' + str(self.__logger.get_imported_diagnoses_count()) + ',\n' +
+              'davon update: ' + str(self.__logger.get_updated_diagnoses_count()) + ',\n' +
+              'davon neu: ' + str(self.__logger.get_imported_diagnoses_count() - self.__logger.get_updated_diagnoses_count())
               )
         conn.disconnect()
 
@@ -324,16 +312,6 @@ class EncounterIDHandler(PatientDataColumnHandler):
         val = self._get_my_value_from_row(row)
         enc_ide = self._helper.anonymize_enc(val) if val is not None else None
         data.set_enc_ide(enc_ide)
-        return data
-
-
-class PatientIDHandler(PatientDataColumnHandler):
-    _column_name = 'Patientennummer'
-
-    def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
-        val = self._get_my_value_from_row(row)
-        pat_ide = self._helper.anonymize_pat(val) if val is not None else None
-        data.set_pat_ide(pat_ide)
         return data
 
 
@@ -520,8 +498,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
         self._sourcesystem_cd = ('gfi_' + os.environ['script_id']
-                                 + 'V' + os.environ['script_version']
-                                 + '_' + Helper().hash_this_filename()[:50])
+                                 + 'V' + os.environ['script_version'])
         self._sourcesystem_sub = self._sourcesystem_cd.split('V')[0]
 
     def update_entries_if_exist(self, enc_num: int, pat_num: int, data: DiagnoseData):
@@ -588,19 +565,18 @@ class ObservationFactEntryHandler(TableEntryHandler):
                int: The number of diagnoses successfully inserted into the database table.
            """
         import_date = self._helper.convert_date_to_i2b2_format(str(datetime.now().strftime('%d.%m.%Y %H:%M:%S'))[0:19])
-        _imported_num = 0
+        imported_num = 0
+
+        imported_num = self._execute_insert_query(enc_num, pat_num, entry, 'AKTIN:DIAG:F', entry.get_main_diagnose(), import_date,
+                                                  imported_num)
         for diagnose in entry.get_diagnoses():
-            _imported_num = self._execute_insert_query(enc_num, pat_num, entry, '@', diagnose, import_date,
-                                                       _imported_num)
-            if diagnose.__eq__(entry.get_main_diagnose()):
-                _modifier = 'AKTIN:DIAG:F'
-                _imported_num = self._execute_insert_query(enc_num, pat_num, entry, _modifier, diagnose, import_date,
-                                                           _imported_num)
+            imported_num = self._execute_insert_query(enc_num, pat_num, entry, '@', diagnose, import_date,
+                                                       imported_num)
 
-        return _imported_num
+        return imported_num
 
-    def _execute_insert_query(self, enc_num: int, pat_num: int, entry: DiagnoseData, _modifier: str, diagnose: str,
-                              import_date, _imported_num: int):
+    def _execute_insert_query(self, enc_num: int, pat_num: int, entry: DiagnoseData, modifier: str, diagnose: str,
+                              import_date, imported_num: int):
         query = (
             db.insert(self._table)
             .values(
@@ -613,20 +589,25 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 update_date=import_date,
                 start_date=entry.get_start_datetime(),
                 provider_id='@',
-                modifier_cd=_modifier
+                modifier_cd=modifier
             )
         )
         try:
             with self._conn.begin():
                 self._conn.execute(query)
-            _imported_num += 1
+            imported_num += 1
 
         except db.exc.SQLAlchemyError:
             duplicate_entry_error_msg = 'psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint'
             if not (traceback.format_exc().__contains__(duplicate_entry_error_msg)):
                 print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
 
-        return _imported_num
+        return imported_num
+
+    def get_patient_num_by_enc_num(self, enc_num: int) -> int:
+        query = db.select(self._table.c.patient_num).where(self._table.c.encounter_num == enc_num)
+        result = self._conn.execute(query).fetchone()
+        return result[0] if result else None
 
 
 class EncounterMappingEntryHandler(TableEntryHandler):
@@ -638,18 +619,6 @@ class EncounterMappingEntryHandler(TableEntryHandler):
     def get_encounter_num_for_ide(self, enc_ide: str) -> int:
         query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide).where(
             self._table.c.encounter_ide == enc_ide)
-        result = self._conn.execute(query).fetchone()
-        return result[0] if result else None
-
-
-class PatientMappingEntryHandler(TableEntryHandler):
-    _table_name = 'patient_mapping'
-
-    def __init__(self, conn: Connection):
-        super().__init__(conn)
-
-    def get_patient_num_for_ide(self, pat_ide: str) -> int:
-        query = db.select(self._table.c.patient_num).where(self._table.c.patient_ide == pat_ide)
         result = self._conn.execute(query).fetchone()
         return result[0] if result else None
 
