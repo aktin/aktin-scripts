@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*
 # Created on Fr Apr 12 13:48:00 2024
-# @VERSION=1.0.2
+# @VERSION=1.0.3
 # @VIEWNAME=AKTIN-Nachimporter-AC
 # @MIMETYPE=csv
 # @ID=anac
@@ -45,11 +45,12 @@ class DiagnoseData:
         self.__enc_ide = None  # encounter id from the csv encoded with sha1
         self.__diagnoses = None  # string that contains a ';' seperated list of diagnoses
         self.__start_date_time = None  # date and timestamp of encounter start (admission)
+        self.__start_diagnose = None    # binary value, that distinguishes diagnoses by False - diagnoses are end diagnoses and being taken from an emergency department dataset, True - diagnoses are start diagnose, taken from inpatient setting
+        self.__main_diagnose = None # the diagnose that is mainly responsible for the hospital or emergency department stay
 
     def is_valid(self):
         """
         Checks if this object is valid for updating the database. The object is valid if no attribute is 'None'.
-        :return:
         """
         for attr_name, attr_value in self.__dict__.items():
             if attr_value is None:
@@ -71,14 +72,31 @@ class DiagnoseData:
     def get_diagnoses(self) -> str:
         return self.__diagnoses
 
-    def set_diagnoses(self, diagnoses_raw: str):
+    def set_diagnoses(self, diagnoses_raw: str, is_start_diagnose: bool):
+        if is_start_diagnose:
+            self.set_start_diagnose(is_start_diagnose)
+        elif self.__start_diagnose is None:
+            self.set_start_diagnose(False)
         self.__diagnoses = diagnoses_raw.split('; ')
+        self.set_main_diagnose(self.__diagnoses[0])
 
     def get_start_datetime(self) -> datetime:
         return self.__start_date_time
 
     def set_start_datetime(self, start_datetime: str):
         self.__start_date_time = start_datetime
+
+    def get_start_diagnose(self):
+        return self.__start_diagnose
+
+    def set_start_diagnose(self, is_start_diagnose: bool):
+        self.__start_diagnose = is_start_diagnose
+
+    def get_main_diagnose(self):
+        return self.__main_diagnose
+
+    def set_main_diagnose(self, diagnose: str):
+        self.__main_diagnose = diagnose
 
 
 class SingletonMeta(type):
@@ -176,10 +194,11 @@ class CSVReader(metaclass=SingletonMeta):
         if is_csv:
             self.__path_csv = path_csv
         else:
-            raise ValueError('Required CSV, got: ' + file_type)
+            raise TypeError('Required CSV, got: ' + file_type)
 
     def iter_rows(self):
-        for index, row in enumerate(pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str)):
+        for index, row in enumerate(
+                pd.read_csv(self.__path_csv, chunksize=1, sep=self.__seperator, encoding=self.__encoding, dtype=str)):
             yield index, row
 
 
@@ -188,6 +207,7 @@ class AktinImporter:
     This class implements the pipeline for updating encounter data in the AKTIN Data Warehouse.
     The update result will be Logged at the end by :class:'Logger'.
     """
+
     def __init__(self):
         self.__reader = CSVReader()
         self.__logger = Logger()
@@ -203,14 +223,14 @@ class AktinImporter:
         - StartDateTimeHandler
         - EndICDHandler
         - StartICDHandler
-        
+
         Returns:
             StartICDHandler: The starting handler in the chain.
         """
         enc_id = EncounterIDHandler()
         date_time = StartDateTimeHandler(enc_id)
-        end_diagnoses = EndICDHandler(date_time)
-        start_diagnoses = StartICDHandler(end_diagnoses)
+        diagnoses = EndICDHandler(date_time)
+        start_diagnoses = StartICDHandler(diagnoses)
         return start_diagnoses
 
     def import_csv(self, path_csv: str):
@@ -231,7 +251,6 @@ class AktinImporter:
         """
         conn = DatabaseConnection()
         connection = conn.connect()
-        pat_map = PatientMappingEntryHandler(connection)
         enc_map = EncounterMappingEntryHandler(connection)
         obs = ObservationFactEntryHandler(connection)
         self.__reader.set_csv_path(path_csv)
@@ -239,9 +258,10 @@ class AktinImporter:
         for index, r in self.__reader.iter_rows():
             data = DiagnoseData()
             data = self.__pipeline.update_pat_from_row(data, r, str(index + 2))
+
             if data.is_valid():
-                enc_num, pat_ide = enc_map.get_enc_num_and_pat_ide_for_ide(data.get_enc_ide())
-                pat_num = pat_map.get_pat_num_for_ide(pat_ide)
+                enc_num = enc_map.get_encounter_num_for_ide(data.get_enc_ide())
+                pat_num = obs.get_patient_num_by_enc_num(enc_num)
                 obs.update_entries_if_exist(enc_num, pat_num, data)
             else:
                 self.__logger.increase_invalid_count()
@@ -306,7 +326,7 @@ class EndICDHandler(PatientDataColumnHandler):
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
         if val is not None:
-            data.set_diagnoses(val)
+            data.set_diagnoses(val, is_start_diagnose=False)
         return data
 
 
@@ -321,7 +341,7 @@ class StartICDHandler(PatientDataColumnHandler):
     def _process_column(self, data: DiagnoseData, row: pd.Series) -> DiagnoseData:
         val = self._get_my_value_from_row(row)
         if val is not None:
-            data.set_diagnoses(val)
+            data.set_diagnoses(val, is_start_diagnose=True)
         return data
 
 
@@ -439,6 +459,7 @@ class DatabaseConnection(metaclass=SingletonMeta):
     def connect(self) -> Connection:
         pattern = 'jdbc:postgresql://(.*?)(\?searchPath=..*)?$'
         url = re.search(pattern, self.__i2b2_url).group(1)
+
         if self.__engine is None:
             self.__engine = db.create_engine(f'postgresql+psycopg2://{self.__username}:{self.__password}@{url}')
         if self.__connection is None:
@@ -487,6 +508,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
         :param pat_num, database intern id for a specific patient
         :param data, DiagnoseData object for updating the database
         """
+
         if (enc_num is not None
                 and pat_num is not None
                 and self.__check_if_observation_exists(enc_num)):
@@ -519,6 +541,7 @@ class ObservationFactEntryHandler(TableEntryHandler):
                 (self._table.c.sourcesystem_cd.like(f'{self._sourcesystem_sub}%'))
             ).returning(self._table.c.encounter_num)
         )
+
         try:
             result = self._conn.execute(query)
             deleted = len(result.fetchall())
@@ -543,30 +566,48 @@ class ObservationFactEntryHandler(TableEntryHandler):
            """
         import_date = self._helper.convert_date_to_i2b2_format(str(datetime.now().strftime('%d.%m.%Y %H:%M:%S'))[0:19])
         imported_num = 0
+
+        imported_num = self._execute_insert_query(enc_num, pat_num, entry, 'AKTIN:DIAG:F', entry.get_main_diagnose(), import_date,
+                                                  imported_num)
         for diagnose in entry.get_diagnoses():
-            query = (
-                db.insert(self._table)
-                .values(
-                    encounter_num=enc_num,
-                    patient_num=pat_num,
-                    concept_cd=f'ICD10GM:{diagnose}',
-                    sourcesystem_cd=self._sourcesystem_cd,
-                    import_date=import_date,
-                    download_date=import_date,
-                    update_date=import_date,
-                    start_date=entry.get_start_datetime(),
-                    provider_id='@',
-                    modifier_cd='@'
-                )
-            )
-            try:
-                self._conn.execute(query)
-                self._conn.commit()
-                imported_num += 1
-            except db.exc.SQLAlchemyError:
-                self._conn.rollback()
-                print(f'Insert operation to {self._table} failed: {traceback.format_exc()}')
+            imported_num = self._execute_insert_query(enc_num, pat_num, entry, '@', diagnose, import_date,
+                                                       imported_num)
+
         return imported_num
+
+    def _execute_insert_query(self, enc_num: int, pat_num: int, entry: DiagnoseData, modifier: str, diagnose: str,
+                              import_date, imported_num: int):
+        query = (
+            db.insert(self._table)
+            .values(
+                encounter_num=enc_num,
+                patient_num=pat_num,
+                concept_cd=f'ICD10GM:{diagnose}',
+                sourcesystem_cd=self._sourcesystem_cd,
+                import_date=import_date,
+                download_date=import_date,
+                update_date=import_date,
+                start_date=entry.get_start_datetime(),
+                provider_id='@',
+                modifier_cd=modifier
+            )
+        )
+        try:
+            with self._conn.begin():
+                self._conn.execute(query)
+            imported_num += 1
+
+        except db.exc.SQLAlchemyError:
+            duplicate_entry_error_msg = 'psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint'
+            if not (traceback.format_exc().__contains__(duplicate_entry_error_msg)):
+                print(f'Update operation to {self._table} failed: {traceback.format_exc()}')
+
+        return imported_num
+
+    def get_patient_num_by_enc_num(self, enc_num: int) -> int:
+        query = db.select(self._table.c.patient_num).where(self._table.c.encounter_num == enc_num)
+        result = self._conn.execute(query).fetchone()
+        return result[0] if result else None
 
 
 class EncounterMappingEntryHandler(TableEntryHandler):
@@ -575,21 +616,9 @@ class EncounterMappingEntryHandler(TableEntryHandler):
     def __init__(self, conn: Connection):
         super().__init__(conn)
 
-    def get_enc_num_and_pat_ide_for_ide(self, enc_ide: str) -> tuple[int, str]:
-        query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide, self._table.c.patient_ide).where(
+    def get_encounter_num_for_ide(self, enc_ide: str) -> int:
+        query = db.select(self._table.c.encounter_num, self._table.c.encounter_ide).where(
             self._table.c.encounter_ide == enc_ide)
-        result = self._conn.execute(query).fetchone()
-        return (result[0], result[2]) if result else (None, None)
-
-
-class PatientMappingEntryHandler(TableEntryHandler):
-    _table_name = 'patient_mapping'
-
-    def __init__(self, conn: Connection):
-        super().__init__(conn)
-
-    def get_pat_num_for_ide(self, pat_ide: str) -> int:
-        query = db.select(self._table.c.patient_num).where(self._table.c.patient_ide == pat_ide)
         result = self._conn.execute(query).fetchone()
         return result[0] if result else None
 
