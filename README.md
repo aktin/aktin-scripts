@@ -9,5 +9,6 @@ The scripts are organized into the following folders:
 - `dwh-migration`: Scripts to create and apply backups when moving an AKTIN DWH to a different server.
 - `dwh-scripts` : Productivity scripts for working with the AKTIN DWH
 - `generic-file-import-scripst` : Python scripts that can be executed by the AKTIN DWH via the interface for generic file imports
+- `general` : General scripts that do not fit in any other category
 - `resources`: Supporting zip files used by the productivity scripts.
 - `sql` : Productivity scripts for database operations on the AKTIN DWH
