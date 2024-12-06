@@ -35,7 +35,7 @@ aktin_project_path = os.path.join(dwh_projects_root, aktin_project_name)
 
 dwh_xml = ET.parse(os.path.join(aktin_project_path, "dwh.xml"))
 
-projects = [p.text for p in dwh_xml.findall("./pom:modules/pom:module", pom_namespace)]
+projects = ["aktin"] + [p.text for p in dwh_xml.findall("./pom:modules/pom:module", pom_namespace)]
 
 if not start_project:
     start_project = os.path.basename(os.getcwd())
