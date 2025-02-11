@@ -54,7 +54,7 @@ clone_and_update_request() {
   local new_request_id="$2"
   local response
   response=$(curl -s --request GET "$BROKER_URL/request/$original_request_id" --header "$AUTH_HEADER")
-  response=$(echo "$response" | sed "s|<id>[0-9]*</id>|<id>$2</id>|")
+  response=$(echo "$response" | sed "0,/<id>[0-9]*<\/id>/s|<id>[0-9]*</id>|<id>$new_request_id</id>|")
   response=$(increase_date_in_request_content "$response" "reference")
   response=$(increase_date_in_request_content "$response" "scheduled")
   echo "$response"
