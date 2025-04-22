@@ -1,0 +1,2 @@
+INSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES (1, '', '2024-01-12 00:00:00')
+INSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES (2, '', '2024-01-09 00:00:00')

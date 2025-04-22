@@ -5,12 +5,12 @@ CREATE VIEW distinct_encounters AS SELECT DATE_TRUNC('month', start_date) AS sta
 
 CREATE VIEW distinct_cases AS SELECT DATE_TRUNC('month', start_date) as month_years, COUNT(*) as cases
                               FROM distinct_encounters
-                              WHERE provider_id LIKE '@'    -- marks entry as aktin data
+                              WHERE provider_id = '@'    -- marks entry as aktin data
                               GROUP BY DATE_TRUNC('month', start_date);
 
 CREATE VIEW distinct_cases_p21 AS SELECT DATE_TRUNC('month', start_date) as month_years, COUNT(*) as p21_cases
                                   FROM distinct_encounters
-                                  WHERE provider_id LIKE 'P21'  -- marks entry as p2 data
+                                  WHERE provider_id = 'P21'  -- marks entry as p2 data
                                   GROUP BY DATE_TRUNC('month', start_date);
 
 CREATE VIEW summary AS SELECT TO_CHAR(distinct_cases.month_years, 'YYYY-MM') AS year_month, distinct_cases.cases AS Cases_in_DWH, distinct_cases_p21.p21_cases AS P21_cases
