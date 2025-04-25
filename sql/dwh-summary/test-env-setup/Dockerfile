@@ -20,7 +20,12 @@ RUN apt-get update && \
 
 # Copy init script into the container
 COPY init-db.sql /docker-entrypoint-initdb.d/
+COPY drop-db.sql /docker-entrypoint-initdb.d/
 COPY insert1.sql /docker-entrypoint-initdb.d/
+COPY insert_c1.sql /docker-entrypoint-initdb.d/
+COPY insert_c2.sql /docker-entrypoint-initdb.d/
+COPY insert_e2.sql /docker-entrypoint-initdb.d/
+COPY insert_e4.sql /docker-entrypoint-initdb.d/
 
 EXPOSE 5432
 

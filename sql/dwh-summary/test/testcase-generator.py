@@ -17,9 +17,9 @@ def generate_datetime(year=None, month=None, day=None) -> str:
 def generate_case(enc_num: int, date: str, p21=False) -> str:
     aktin_case_id = "@"
     p21_case_id = "P21"
-    case_str = f"INSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES ({enc_num}, \'{aktin_case_id}\', \'{date}\')"
+    case_str = f"INSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES ({enc_num}, \'{aktin_case_id}\', \'{date}\');"
     if p21:
-        case_str += f"\nINSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES ({enc_num}, \'{p21_case_id}\', \'{date}\')"
+        case_str += f"\nINSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES ({enc_num}, \'{p21_case_id}\', \'{date}\');"
     return case_str
 
 def print_test_cases_c1():
