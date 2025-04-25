@@ -1,1 +1,0 @@
-INSERT INTO i2b2crcdata.observation_fact (encounter_num, provider_id, start_date) VALUES (1, '@', '2025-04-16 11:33:00')
