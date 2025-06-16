@@ -1,0 +1,92 @@
+@startuml
+start
+:Copy "create_backup" script to old server;
+
+partition "Old Ubuntu Server" {
+    :Move to "create_dwh_backup.sh";
+    :Execute "create_dwh_backup.sh";
+
+    rectangle "create_dwh_backup.sh" {
+        :Start backup;
+        :"backup_file.tar";
+        :Copy "backup_file.tar" to new Server;
+    }
+
+}
+
+partition "New Server" {
+    :Copy "apply_dwh_backup" script to "backup_file.tar" dir;
+    :Execute "apply_dwh_backup" script;
+    :Test DWH if okay;
+}
+
+end
+@enduml
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+@startuml
+start
+partition "Create Backup of Docker DWH  " {
+    :Display running docker containers;
+    :**Prompt:** Insert target wildfly container;
+    :Await input;
+    note left: **var:** wildfly_container_name
+
+    if (Container found?) then (yes)
+
+    else (no)
+        :"Container not found" Error;
+        end
+    endif
+
+}
+
+partition "create_dwh_backup" {
+    :crate local dwh backup;
+}
+end
+@enduml
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+@startuml
+actor Promoter
+actor Entrant
+
+Promoter --> (Create Event)
+Promoter -> (Attend Event)
+
+Entrant --> (Find Event)
+(Attend Event) <- Entrant
+
+(Attend Event) <.. (Create Member)  : <<include>>
+
+@enduml
+
+
+
+
+
+@startuml
+skinparam dpi 180
+
+' Local
+top to bottom direction
+rectangle "Diagram A" {
+  actor User
+  User --> (Login)
+  (Login) --> (Dashboard)
+}
+
+rectangle "Diagram B" {
+  actor Admin
+  Admin --> (Review)
+  (Review) --> (Approve)
+}
+@enduml
+
+
