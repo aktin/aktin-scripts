@@ -10,9 +10,8 @@ CREATE VIEW enc_num_adjusted_timestamps AS SELECT _main.encounter_num as encount
 
 CREATE VIEW summary AS SELECT
                           TO_CHAR(DATE_TRUNC('month', true_earliest_date), 'YYYY-MM') AS month_years,
-                          COUNT(*) FILTER (WHERE provider_id = '@') AS all_encounters_per_month,
-                          COUNT(*) FILTER (WHERE provider_id = 'P21') AS from_which_p21,
-                          COUNT(*) FILTER (WHERE provider_id = '@') - COUNT(*) FILTER (WHERE provider_id = 'P21') AS enc_without_p21
+                          COUNT(*) FILTER (WHERE provider_id = '@') AS aktin_encounters,
+                          COUNT(*) FILTER (WHERE provider_id = 'P21') AS aktin_encounters_p21
                         FROM enc_num_adjusted_timestamps
                         GROUP BY DATE_TRUNC('month', true_earliest_date)
                         ORDER BY DATE_TRUNC('month', true_earliest_date);
