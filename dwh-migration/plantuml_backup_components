@@ -57,6 +57,9 @@ rectangle "Components necessary for dwh backup" {
 left to right direction
 
 rectangle "Components necessary for docker-dwh backup" {
+    ' init components
+    [check container status]
+    [Create backup dir] #LightBlue
 
     [check container status] --> [Create backup dir]
 
@@ -106,7 +109,10 @@ rectangle "Components necessary for docker-dwh backup" {
 }
 @enduml
 
-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+
 
 
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -116,45 +122,60 @@ rectangle "Components necessary for docker-dwh backup" {
 @startuml
 left to right direction
 
-rectangle "Components necessary for docker-dwh backup" {
+rectangle "Components necessary for unified backup" {
+
+    [check container status] --> [Create backup dir]
+
     package "database backup" {
-        database "aktin" {
-        }
-        database "i2b2" {
-        }
+        [Create backup dir] --> [move to postgresql container]
 
-        [move to postgresql container] --> [aktin_dump]
-        [move to postgresql container] --> [i2b2_dump]
-        [i2b2_dump] <. i2b2
-        aktin .> [aktin_dump]
-        [i2b2_dump] --> [move i2b2_dump to host]
-        [move i2b2_dump to host] --> [exit postgresql container]
-        [aktin_dump] --> [move aktin_dump to host]
-        [move aktin_dump to host] --> [exit postgresql container]
 
+        node "docker database-container" {
+            database "aktin" {
+            }
+            database "i2b2" {
+            }
+
+            [move to postgresql container] --> [aktin_dump]
+            [move to postgresql container] --> [i2b2_dump]
+            [i2b2_dump] <. i2b2
+            aktin .> [aktin_dump]
+            [i2b2_dump] --> [move i2b2_dump to host]
+            [move i2b2_dump to host] --> [exit postgresql container]
+            [aktin_dump] --> [move aktin_dump to host]
+            [move aktin_dump to host] --> [exit postgresql container]
+
+        }
     }
+
 
     package "dwh/wildfly configurations" {
-        [move to wildfly container] --> [backup aktin.properties]
-        [move to wildfly container] --> [backup aktin.properties backups]
-        [move to wildfly container] --> [backup standalone.conf]
-        [move to wildfly container] --> [backup standalone.xml]
+        [Create backup dir] --> [move to wildfly container]
 
-        [backup aktin.properties] --> [move to host]
-        [backup aktin.properties backups] --> [move to host]
-        [backup standalone.conf] --> [move to host]
-        [backup standalone.xml] --> [move to host]
 
-        [move to host] --> [exit wildfly container]
+        node "docker wildfly-container" {
+            [move to wildfly container] --> [backup aktin.properties]
+            [move to wildfly container] --> [backup aktin.properties backups]
+            [move to wildfly container] --> [backup standalone.conf]
+            [move to wildfly container] --> [backup standalone.xml]
+
+            [backup aktin.properties] --> [move config-backups to host]
+            [backup aktin.properties backups] --> [move config-backups to host]
+            [backup standalone.conf] --> [move config-backups to host]
+            [backup standalone.xml] --> [move config-backups to host]
+            [move config-backups to host] --> [exit wildfly container]
+        }
     }
 
-    package "helpers" {
-        [check is docker]
-        [Create backup dir]
-        [Compress Backup dir to file]
-    }
-
+    [exit wildfly container] --> [Compress Backup dir to tar-file]
+    [exit postgresql container] --> [Compress Backup dir to tar-file]
 }
+legend left
+|= Color |= Meaning |
+|<#LightBlue>       | Container Status Check |
+|<#LightGreen>      | Backup Directory Setup |
+|<#Orange>          | Final Compression Step |
+endlegend
 @enduml
 
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
