@@ -22,9 +22,9 @@ fi
 }
 
 readonly tarfile="$1"
-readonly postgres_container="$2"
-readonly apache_container="$3"
-readonly wildfly_container="$4"
+readonly wildfly_container="$2"
+readonly postgres_container="$3"
+readonly apache_container="$4"
 
 
 # create log file
@@ -68,11 +68,17 @@ stop_aktin_services() {
     sudo docker container start "$postgres_container"
 }
 
+start_wildfly() {
+    sudo docker container start "$wildfly_container"
+}
+
+
+
 restart_aktin_services() {
     echo "starting aktin services"
     sudo docker container restart "$postgres_container"
-    sudo docker container start "$apache_container"
-    sudo docker container start "$wildfly_container"
+    sudo docker container restart "$apache_container"
+    sudo docker container restart "$wildfly_container"
 }
 
 extract_and_copy_to_docker() {
@@ -190,6 +196,15 @@ import_databases_backup() {
     sudo docker exec "$container" psql -U postgres -d aktin -q -f "$backup_folder/backup_aktin.sql" > /dev/null
 }
 
+import_aktin_properties() {
+    local backup_folder="$1"
+    local backup_file_name="backup_aktin.properties" # TODO set dynamically
+    local target_file_name="aktin.properties"
+    local target_path="/etc/aktin"
+
+    echo "replace aktin.properties with properties from backup"
+    copy_to_container "$wildfly_container" "$backup_folder/$backup_file_name" "$target_path/$target_file_name"
+}
 
 main() {
     # check if containers originate from same data warehouse
@@ -198,18 +213,21 @@ main() {
     check_container_running "$apache_container"
     check_container_running "$wildfly_container"
 
-    local postgres_container_name="$postgres_container"
     local container_backup_path="/var/tmp"
-#    local docker_db_path="/var/lib/postgresql/data"
     local backup_folder
+    echo "extract backup-tar on host"
     local backup_folder_host=$(extract_tar_to_tmp "$tarfile")
     backup_folder=$(copy_to_container "$postgres_container" "$backup_folder_host" "$container_backup_path")
 
     stop_aktin_services
-    import_databases_backup "$backup_folder" "$postgres_container_name"
+    import_databases_backup "$backup_folder" "$postgres_container"
+    start_wildfly
+    import_aktin_properties "$backup_folder_host"
     restart_aktin_services
-    remove_dir "$backup_folder"
+    remove_dir "$(dirname "$backup_folder_host")"
     echo "migration completed"
+
+
 }
 
 main | tee -a "$log"
