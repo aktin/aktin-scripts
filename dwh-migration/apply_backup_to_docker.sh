@@ -206,6 +206,14 @@ import_aktin_properties() {
     copy_to_container "$wildfly_container" "$backup_folder/$backup_file_name" "$target_path/$target_file_name"
 }
 
+import_config() {
+  local src_path="$1"
+  local target_path="$2"
+
+  echo "importing config from: $src_path to: $target_path"
+  sudo docker cp "$src_path" "$target_path"
+}
+
 main() {
     # check if containers originate from same data warehouse
     check_containers_same_dwh
@@ -222,7 +230,15 @@ main() {
     stop_aktin_services
     import_databases_backup "$backup_folder" "$postgres_container"
     start_wildfly
-    import_aktin_properties "$backup_folder_host"
+
+    # import standalone.xml
+    import_config "$backup_folder_host/backup_standalone.xml" "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
+    # import standalone.conf
+    import_config "$backup_folder_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
+    # import aktin.properties
+    import_config "$backup_folder_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
+
+#    import_aktin_properties "$backup_folder_host"
     restart_aktin_services
     remove_dir "$(dirname "$backup_folder_host")"
     echo "migration completed"
