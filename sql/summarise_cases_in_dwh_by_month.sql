@@ -6,13 +6,14 @@ CREATE VIEW unique_encounter_providers AS
         GROUP BY fact.encounter_num, fact.provider_id, visit.start_date
         ORDER BY fact.encounter_num;
 
-CREATE VIEW summary AS SELECT
-                          TO_CHAR(DATE_TRUNC('month', visit_date), 'YYYY-MM') AS month_years,
-                          COUNT(*) FILTER (WHERE provider_id = '@') AS aktin_encounters,
-                          COUNT(*) FILTER (WHERE provider_id = 'P21') AS aktin_encounters_p21
-                        FROM unique_encounter_providers
-                        GROUP BY DATE_TRUNC('month', visit_date)
-                        ORDER BY DATE_TRUNC('month', visit_date);
+-- main table containing number of all encounters and exclusively p21 encounters for each month
+CREATE VIEW summary AS
+    SELECT TO_CHAR(DATE_TRUNC('month', visit_date), 'YYYY-MM') AS month_years,
+           COUNT(*) FILTER (WHERE provider_id = '@') AS aktin_encounters,
+           COUNT(*) FILTER (WHERE provider_id = 'P21') AS aktin_encounters_p21
+    FROM unique_encounter_providers
+    GROUP BY DATE_TRUNC('month', visit_date)
+    ORDER BY DATE_TRUNC('month', visit_date);
 
 
 -- Table with encounter nums for each month
