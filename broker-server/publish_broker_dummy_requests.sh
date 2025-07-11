@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ensure the correct number of arguments is provided
 [[ $# -lt 4 ]] && {
-  echo "Usage: $0 <broker_url> <admin_api_key> <dummy_requests_zip> <node_1> ..."
+  echo "Usage: $0 <broker_url> <admin_api_key> <dummy_requests_zip> <node_id_1> ..."
   exit 1
 }
 
@@ -22,7 +22,7 @@ readonly broker_url="$1/broker"
 readonly admin_api_key=$2
 readonly dummy_requests_zip=$3
 
-readonly node_ids=(${@:3})
+readonly node_ids=(${@:4})
 if [ ${#node_ids[@]} -eq 0 ]; then
     echo "At least one node id is required as input"
     exit 1
