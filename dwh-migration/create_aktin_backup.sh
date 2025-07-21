@@ -60,7 +60,10 @@ backup_database() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db >$destination
+#    sudo -u postgres pg_dump $db --data-only > $destination
+    # shellcheck disable=SC2024
+    sudo -u postgres pg_dump $db -no-owner --no-privileges --clean --if-exists > $destination
+#    sudo -u postgres pg_dump -d i2b2 --no-owner --no-privileges --clean --if-exists -f $destination
 }
 
 main() {

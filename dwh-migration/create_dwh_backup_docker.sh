@@ -58,7 +58,7 @@ backup_database() {
 
     echo -e "create backup of database $db"
 #    sudo docker exec -it "$postgres_container" "pg_dump -U postgres $db > $container_dest"
-    docker exec -u postgres "$postgres_container" bash -c "pg_dump -U postgres $db > $container_dest"
+    docker exec -u postgres "$postgres_container" bash -c "pg_dump -U postgres $db --data-only > $container_dest"
 
     # opy backup file to host
     sudo docker cp "$postgres_container:$container_dest" "$destination"
