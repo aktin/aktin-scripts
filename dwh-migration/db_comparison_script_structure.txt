@@ -1,0 +1,24 @@
+
+@startuml
+top to bottom direction
+
+
+rectangle "Components necessary for dwh backup" {
+    [extract_db_contentz]
+    [compare_db_extractionse]
+}
+
+component "extract_db_content" {
+    "give db name" --> [get_all_tables]
+    [get_all_tables] --> "for all tables"
+    "for all tables" --> [get_table_content]
+    [get_table_content] --> [save_tc_as_file]
+    "for all tables" --> [get_table_content]
+    [get_table_content] --> [save_tc_as_file]
+    "for all tables" --> [get_table_content]
+    [get_table_content] --> [save_tc_as_file]
+    [save_tc_as_file] --> [merge_tcs_in_one_unified_format]
+    [merge_tcs_in_one_unified_format] --> "Return path"
+}
+
+@end

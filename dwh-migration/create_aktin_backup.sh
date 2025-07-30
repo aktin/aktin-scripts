@@ -60,15 +60,23 @@ backup_database() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-#    sudo -u postgres pg_dump $db --data-only > $destination
-    # shellcheck disable=SC2024
-    sudo -u postgres pg_dump $db -no-owner --no-privileges --clean --if-exists > $destination
-#    sudo -u postgres pg_dump -d i2b2 --no-owner --no-privileges --clean --if-exists -f $destination
+    sudo -u postgres pg_dump $db \
+  --no-owner \
+  --no-privileges \
+  --clean \
+  --if-exists \
+  > "$destination"
+
+}
+
+backup_globals() {
+  local destination=$1
+  sudo -u postgres pg_dumpall --globals-only > $destination
 }
 
 main() {
     local tmp_dir=$(create_dir "backup_$current")
-
+	
     backup_file "/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
     backup_file "$wildfly_home/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
     backup_file "$wildfly_home/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
@@ -76,6 +84,7 @@ main() {
     create_dir "$tmp_dir/var/lib"
     create_dir "$tmp_dir/var/lib/aktin"
     backup_folder "/var/lib/aktin" "$tmp_dir/var/lib/aktin"
+    backup_globals "$tmp_dir/globals_backup.sql"
     backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
     backup_database "aktin" "$tmp_dir/backup_aktin.sql"
 
