@@ -56,7 +56,7 @@ backup_folder() {
     cp -r $folder/* $destination
 }
 
-backup_database() {
+backup_aktin() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
@@ -66,7 +66,19 @@ backup_database() {
   --clean \
   --if-exists \
   > "$destination"
+}
 
+backup_i2b2() {
+    local db="i2b2"
+    local destination=$1
+    echo -e "backing up $db"
+    sudo -u postgres pg_dump $db \
+    --exclude-table=i2b2pm.pm_cell_data \
+  --no-owner \
+  --no-privileges \
+  --clean \
+  --if-exists \
+  > "$destination"
 }
 
 backup_globals() {
@@ -85,8 +97,8 @@ main() {
     create_dir "$tmp_dir/var/lib/aktin"
     backup_folder "/var/lib/aktin" "$tmp_dir/var/lib/aktin"
     backup_globals "$tmp_dir/globals_backup.sql"
-    backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
-    backup_database "aktin" "$tmp_dir/backup_aktin.sql"
+    backup_i2b2 "$tmp_dir/backup_i2b2.sql"
+    backup_aktin "aktin" "$tmp_dir/backup_aktin.sql"
 
     tar_dir "$tmp_dir"
     remove_dir "$tmp_dir"

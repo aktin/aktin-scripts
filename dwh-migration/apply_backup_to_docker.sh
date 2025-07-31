@@ -182,7 +182,12 @@ drop_user() {
 import_databases_backup() {
     local backup_folder=$1
     local container=$2
+    local path_to_pmcell_backup="pmbackup.sql"
 
+    # backup "pm_cell_data"-Table
+    sudo docker exec -it "$container" pg_dump -U postgres -t i2b2pm.pm_cell_data --data-only i2b2 > "$path_to_pmcell_backup"
+
+    # drop database
     # Arrays for cleaner iteration
     local databases=("aktin" "i2b2")
     local i2b2_users=("i2b2crcdata" "i2b2hive" "i2b2imdata" "i2b2metadata" "i2b2pm" "i2b2workdata")
@@ -199,6 +204,7 @@ import_databases_backup() {
        drop_user "$user"
     done
 
+    # recreate database
     echo "reinitialising aktin and i2b2 databases"
     sudo docker exec -i "$container" psql -U postgres -c "CREATE DATABASE aktin;"
     sudo docker exec -i "$container" psql -U postgres -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
@@ -209,6 +215,11 @@ import_databases_backup() {
     echo "importing the backup of aktin and i2b2 databases"
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$backup_folder/backup_i2b2.sql" > /dev/null
     sudo docker exec "$container" psql -U postgres -d aktin -q -f "$backup_folder/backup_aktin.sql" > /dev/null
+
+    # importing backup of pm_cell_data
+    sudo docker exec "$container" psql -U postgres -d i2b2 -q -c "DROP TABLE IF EXISTS i2b2pm.pm_cell_data;" > /dev/null
+    sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$path_to_pmcell_backup" > /dev/null
+    sudo rm "$path_to_pmcell_backup"
 }
 
 import_aktin_properties() {
@@ -218,6 +229,7 @@ import_aktin_properties() {
     local target_path="/etc/aktin"
 
     echo "replace aktin.properties with properties from backup"
+
     copy_to_container "$wildfly_container" "$backup_folder/$backup_file_name" "$target_path/$target_file_name"
 }
 
