@@ -17,7 +17,7 @@ fi
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 4 ]] && {
-    echo "Usage: $0 <path_to_backup_tarfile> <wildfly_container_name> <postgres_container_name> <httpd_container_name>"
+    echo "Usage: $0 <path_to_backup_tarfile> <wildfly_container_name> <postgres_container_name> <httpd_container>"
     exit 1
 }
 
@@ -25,10 +25,7 @@ readonly tarfile="$1"
 readonly wildfly_container="$2"
 readonly postgres_container="$3"
 readonly apache_container="$4"
-
-
-# create log file
-readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log
+readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log  #log file
 
 check_containers_same_dwh() {
   project_name_postgres="${postgres_container%%-*}"
@@ -48,7 +45,8 @@ check_containers_same_dwh() {
   fi
 }
 
-check_container_running() {
+# Exits script if given container is not running
+exit_if_container_down() {
   local container_name="$1"
 
   if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
@@ -60,19 +58,18 @@ check_container_running() {
   fi
 }
 
-
-stop_aktin_services() {
-    echo "stopping aktin services"
+# Enable database migration by stopping all containers, depending on- and thereby locking the database for changes
+stop_db_users() {
+    echo "stop container $apache_container"
     sudo docker container stop "$apache_container"
+    echo "stop container $wildfly_container"
     sudo docker container stop "$wildfly_container"
-    sudo docker container start "$postgres_container"
 }
 
 start_wildfly() {
+    echo "starting wildfly container: $wildfly_container"
     sudo docker container start "$wildfly_container"
 }
-
-
 
 restart_aktin_services() {
     echo "starting aktin services"
@@ -117,7 +114,8 @@ extract_and_copy_to_docker() {
     echo "$dest_path/$folder_name"
 }
 
-extract_tar_to_tmp() {
+# Extracts a given tar file inside a temporary directory
+extract_tar() {
     local tar="$1"
     local temp_dir
 
@@ -164,20 +162,10 @@ drop_user() {
     sudo docker exec -i "$container" psql -U postgres -q -c "DROP USER IF EXISTS $user_name;" > /dev/null
 }
 
-#import_databases_backup() {
-#    local backup_folder=$1
-#    local container=$2
-#
-#    # Arrays for cleaner iteration
-#    local databases=("aktin" "i2b2")
-#    local i2b2_users=("i2b2crcdata" "i2b2hive" "i2b2imdata" "i2b2metadata" "i2b2pm" "i2b2workdata")
-#
-#
-#    echo "importing the backup (data only) of aktin and i2b2 databases"
-##   -q: quiet, -f: file, -a: data only
-#    sudo docker exec "$container" psql -U postgres -d i2b2 -a -q -f "$backup_folder/backup_i2b2.sql" > /dev/null
-#    sudo docker exec "$container" psql -U postgres -d aktin -a -q -f "$backup_folder/backup_aktin.sql" > /dev/null
-#}
+# package pv is used to display progress bars for this script
+install_package_pv() {
+  sudo docker exec "$postgres_container" apt update && apt install -y pv
+}
 
 import_databases_backup() {
     local backup_folder=$1
@@ -185,7 +173,8 @@ import_databases_backup() {
     local path_to_pmcell_backup="pmbackup.sql"
 
     # backup "pm_cell_data"-Table
-    sudo docker exec -it "$container" pg_dump -U postgres -t i2b2pm.pm_cell_data --data-only i2b2 > "$path_to_pmcell_backup"
+    sudo docker exec -it "$container" pg_dump -U postgres -t i2b2pm.pm_cell_data i2b2 > "$path_to_pmcell_backup"
+    sudo docker cp "$path_to_pmcell_backup" "$container:/tmp/"
 
     # drop database
     # Arrays for cleaner iteration
@@ -211,14 +200,13 @@ import_databases_backup() {
     sudo docker exec -i "$container" psql -U postgres -c "CREATE DATABASE i2b2;"
     sudo docker exec -i "$container" psql -U postgres -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
 
-
     echo "importing the backup of aktin and i2b2 databases"
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$backup_folder/backup_i2b2.sql" > /dev/null
     sudo docker exec "$container" psql -U postgres -d aktin -q -f "$backup_folder/backup_aktin.sql" > /dev/null
 
     # importing backup of pm_cell_data
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -c "DROP TABLE IF EXISTS i2b2pm.pm_cell_data;" > /dev/null
-    sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$path_to_pmcell_backup" > /dev/null
+    sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "/tmp/$path_to_pmcell_backup" > /dev/null
     sudo rm "$path_to_pmcell_backup"
 }
 
@@ -242,35 +230,33 @@ import_config() {
 }
 
 main() {
-    # check if test-containers originate from same data warehouse
-    check_containers_same_dwh
-    check_container_running "$postgres_container"
-    check_container_running "$apache_container"
-    check_container_running "$wildfly_container"
+    # Validate script variables
+    check_containers_same_dwh   # check if test-containers originate from same data warehouse
+    exit_if_container_down "$postgres_container"
+    exit_if_container_down "$apache_container"
+    exit_if_container_down "$wildfly_container"
 
-    local container_backup_path="/var/tmp"
-    local backup_folder
+    # Install additional packages
+    install_package_pv
+
+    # Copy backup to container
+    local backup_dir_docker="/var/tmp"  # target path inside the container
     echo "extract backup-tar on host"
-    local backup_folder_host=$(extract_tar_to_tmp "$tarfile")
-    backup_folder=$(copy_to_container "$postgres_container" "$backup_folder_host" "$container_backup_path")
+    local backup_dir_host=$(extract_tar "$tarfile")
+    local backup_folder=$(copy_to_container "$postgres_container" "$backup_dir_host" "$backup_dir_docker")
 
-    stop_aktin_services
+    stop_db_users   # remove database lock
     import_databases_backup "$backup_folder" "$postgres_container"
     start_wildfly
 
-    # import standalone.xml
-    import_config "$backup_folder_host/backup_standalone.xml" "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
-    # import standalone.conf
-    import_config "$backup_folder_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
-    # import aktin.properties
-    import_config "$backup_folder_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
+    # import static config files standalone.xml
+    import_config "$backup_dir_host/backup_standalone.xml" "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
+    import_config "$backup_dir_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
+    import_config "$backup_dir_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
 
-#    import_aktin_properties "$backup_folder_host"
     restart_aktin_services
-    remove_dir "$(dirname "$backup_folder_host")"
+    remove_dir "$(dirname "$backup_dir_host")"
     echo "migration completed"
-
-
 }
 
 main | tee -a "$log"
