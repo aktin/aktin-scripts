@@ -136,7 +136,6 @@ copy_to_container() {
     local dest_path="$3"       # Destination path in container
     local source_name=$(basename "$source_dir")
 
-    echo "Copy $source_dir to $container_name:$dest_path"
     docker cp "$source_dir" "$container_name:$dest_path"
     # Return the full destination path inside container
     echo "$dest_path/$source_name"
@@ -204,17 +203,16 @@ import_databases_backup() {
 
     # Recreate AKTIN database with proper user and schema
     echo "reinitialising aktin and i2b2 databases"
-    sudo docker exec -i "$container" psql -U postgres -c "CREATE DATABASE aktin;"
-    sudo docker exec -i "$container" psql -U postgres -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
+    sudo docker exec "$container" psql -U postgres -c "CREATE DATABASE aktin;"
+    sudo docker exec "$container" psql -U postgres -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
 
     # Recreate i2b2 database with all required users and schemas
-    sudo docker exec -i "$container" psql -U postgres -c "CREATE DATABASE i2b2;"
-    sudo docker exec -i "$container" psql -U postgres -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
+    sudo docker exec "$container" psql -U postgres -c "CREATE DATABASE i2b2;"
+    sudo docker exec "$container" psql -U postgres -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
 
-    # Import database backups with progress indicators
     echo "importing the backup of aktin and i2b2 databases"
-    pv "$backup_folder/backup_i2b2.sql" | sudo docker exec -i "$container" psql -U postgres -d i2b2 -q > /dev/null
-    pv "$backup_folder/backup_aktin.sql" | sudo docker exec -i "$container" psql -U postgres -d aktin -q > /dev/null
+    sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "/$backup_folder/backup_i2b2.sql" > /dev/null
+    sudo docker exec "$container" psql -U postgres -d aktin -q -f "/$backup_folder/backup_aktin.sql" > /dev/null
 
     # Restore the pm_cell_data table from the temporary backup
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -c "DROP TABLE IF EXISTS i2b2pm.pm_cell_data;" > /dev/null
@@ -255,9 +253,6 @@ main() {
     exit_if_container_down "$postgres_container"
     exit_if_container_down "$apache_container"
     exit_if_container_down "$wildfly_container"
-
-    # Install required tools for progress display
-    install_package_pv
 
     # Extract and copy backup files to the database container
     local backup_dir_docker="/var/tmp"  # target path inside the container
