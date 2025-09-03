@@ -31,18 +31,6 @@ readonly apache_container="$4"   # Name of the Apache HTTP server container
 readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log  # Generate timestamped log file name
 
 
-#---------------------
-# DOCKER Paths (commented out - legacy code)
-#---------------------
-#readonly DB_BACKUP=       "$postgres_container:/var/tmp/"
-#readonly STANDALONE_XML=  "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
-#readonly STANDALONE_CONF= "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
-#readonly PROPERTIES=      "$wildfly_container:/etc/aktin/aktin.properties"
-#readonly TMP_DIR=         "$(mktemp -d -p "$PWD")"
-#readonly EXTRACTED=       "$temp_dir/$folder_name"
-
-
-
 # Function to verify that all three containers belong to the same Docker Compose project
 # This ensures we're working with related containers from the same deployment
 do_containers_share_prefix() {
