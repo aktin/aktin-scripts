@@ -1,4 +1,13 @@
 #!/bin/bash
+#--------------------------------------
+# Script Name:  create_docker_backup.sh
+# Version:      1.0
+# Author:       whoy@ukaachen.de
+# Date:         4 Jun 25
+# Purpose:      Creates a backup file of a AKTIN dockerized data warehouse,
+#               containing data and configurations of the original
+#--------------------------------------
+
 
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"
@@ -30,24 +39,16 @@ check_container_running() {
   fi
 }
 
-backup_docker_file() {
-  local src="$1"
-  local dest="$2"
-  sudo docker cp "$src" "$dest"
-}
-
-backup_docker_folder() {
-    local folder="$1"
+backup_docker_resource() {
+    local resource="$1"
     local destination="$2"
-    echo -e "backing up $folder"
-    docker cp "$folder" "$destination"
+    echo -e "backing up $resource"
+    docker cp "$resource" "$destination"
 }
 
 create_dir() {
     local dir=$1
-    if [ ! -d $dir ]; then
-        mkdir $dir
-    fi
+    mkdir -p $dir
     echo $dir
 }
 
@@ -58,10 +59,10 @@ backup_database() {
 
     echo -e "create backup of database $db"
 #    sudo docker exec -it "$postgres_container" "pg_dump -U postgres $db > $container_dest"
-    docker exec -u postgres "$postgres_container" bash -c "pg_dump -U postgres $db --data-only > $container_dest"
+    docker exec -u postgres "$postgres_container" bash -c "pg_dump -U postgres $db > $destination"
 
     # opy backup file to host
-    sudo docker cp "$postgres_container:$container_dest" "$destination"
+#    sudo docker cp "$postgres_container:$container_dest" "$destination"
 }
 
 tar_dir()  {
@@ -79,15 +80,13 @@ main() {
 
   # prepare
   local tmp_dir=$(create_dir "backup_$current")
-  # backup "aktin.properties" from container
-  backup_docker_file "$wildfly_container:/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
-  backup_docker_file "$wildfly_container:/opt/wildfly/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
-  backup_docker_file "$wildfly_container:/opt/wildfly/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
+  # backup configuration files from container
+  backup_docker_resource "$wildfly_container:/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
+  backup_docker_resource "$wildfly_container:/opt/wildfly/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
+  backup_docker_resource "$wildfly_container:/opt/wildfly/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
 
-  create_dir "$tmp_dir/var"
-  create_dir "$tmp_dir/var/lib"
-  create_dir "$tmp_dir/var/lib/aktin"
-  backup_docker_folder "$wildfly_container:/var/lib/aktin" "$tmp_dir/var/lib/aktin"
+  create_dir "$tmp_dir/var/lib/"
+  backup_docker_resource "$wildfly_container:/var/lib/aktin" "$tmp_dir/var/lib"
 
   backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
   backup_database "aktin" "$tmp_dir/backup_aktin.sql"

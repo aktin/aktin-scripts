@@ -60,30 +60,22 @@ backup_aktin() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db \
-  --no-owner \
-  --no-privileges \
-  --clean \
-  --if-exists \
-  > "$destination"
+    sudo -u postgres pg_dump $db --clean > "$destination"
 }
 
 backup_i2b2() {
     local db="i2b2"
     local destination=$1
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db \
-    --exclude-table=i2b2pm.pm_cell_data \
-  --no-owner \
-  --no-privileges \
-  --clean \
-  --if-exists \
-  > "$destination"
+    sudo -u postgres pg_dump $db --clean > "$destination"
 }
 
 backup_globals() {
+  # Globals contain cluster data of a postgresql cluster. It involves ownerships,
+  # table structures and other metadata and is necessary for migration,
+  # especially when using data-only dump files
   local destination=$1
-  sudo -u postgres pg_dumpall --globals-only > $destination
+  sudo -u postgres pg_dumpall --globals-only > "$destination"
 }
 
 main() {
