@@ -28,6 +28,7 @@ readonly apache_container="$4"
 readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log
 cleanup=()
 
+
 check_containers_same_dwh() {
   project_name_postgres="${postgres_container%%-*}"
   project_name_apache="${apache_container%%-*}"
@@ -79,41 +80,6 @@ restart_aktin_services() {
     sudo docker container restart "$wildfly_container"
 }
 
-extract_and_copy_to_docker() {
-    local tar="$1"
-    local container="$2"
-    local dest_path="$3"
-
-    local temp_dir
-    temp_dir=$(mktemp -d -p "$PWD")
-
-    # Extract and copy in one go
-    tar -xf "$tar" -C "$temp_dir"
-
-    # Get the single extracted folder name
-    local folder
-    folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
-
-    # Check if there's exactly one directory
-    if [[ $(echo "$folder" | wc -l) -ne 1 ]]; then
-        echo "Error: Archive contains multiple folders or no folders" >&2
-        rm -rf "$temp_dir"
-        return 1
-    fi
-
-    # Get just the folder name (basename)
-    local folder_name
-    folder_name=$(basename "$folder")
-
-    # Copy entire temp directory contents to Docker
-    docker cp "$temp_dir/." "$container:$dest_path"
-
-    # Clean up
-    rm -rf "$temp_dir"
-
-    # Return the Docker path to the extracted folder
-    echo "$dest_path/$folder_name"
-}
 
 # Extracts a given tar file inside a temporary directory
 extract_tar() {
@@ -121,6 +87,7 @@ extract_tar() {
     local temp_dir
 
     temp_dir=$(mktemp -d -p "$PWD")
+    cleanup+=("$temp_dir")
     # Extract and copy in one go
     tar -xf "$tar" -C "$temp_dir"
     # Get the single extracted folder name
@@ -139,30 +106,9 @@ extract_tar() {
     echo "$temp_dir/$folder_name"
 }
 
-copy_to_container() {
-    local container_name="$1"
-    local source_dir="$2"
-    local dest_path="$3"
-    local source_name=$(basename "$source_dir")
-
-    docker cp "$source_dir" "$container_name:$dest_path"
-    echo "$dest_path/$source_name"
-}
-
 remove_dir() {
     rm -rf "$1"
 }
-
-drop_db() {
-    local database_name="$1"
-    sudo docker exec -i "$container" psql -U postgres -q -c "DROP DATABASE IF EXISTS $database_name;" > /dev/null
-}
-
-drop_user() {
-    local user_name=$1
-    sudo docker exec -i "$container" psql -U postgres -q -c "DROP USER IF EXISTS $user_name;" > /dev/null
-}
-
 
 import_databases_backup() {
     local backup_folder=$1      # Path to backup folder inside container
@@ -171,45 +117,16 @@ import_databases_backup() {
 
     # Create a backup of pm_cell_data inside the container
     sudo docker exec -it "$container" sh -c "pg_dump -U postgres -t i2b2pm.pm_cell_data i2b2 --data-only > $path_to_pmcell_backup"
-
-    # Define databases and users that need to be recreated
-    local databases=("aktin" "i2b2")
-    local i2b2_users=("i2b2crcdata" "i2b2hive" "i2b2imdata" "i2b2metadata" "i2b2pm" "i2b2workdata")
-
-    echo "Cleaning up existing databases and users"
-
-#    # Drop existing databases to start fresh
-#    for db in "${databases[@]}"; do
-#        drop_db "$db"
-#    done
-#
-#    # Drop existing users to avoid conflicts
-#    sudo docker exec "$container" psql -U postgres -c "DROP USER IF EXISTS aktin;"
-#    for user in "${i2b2_users[@]}"; do
-#       drop_user "$user"
-#    done
-
-    # Recreate AKTIN database with proper user and schema
-#    echo "reinitialising aktin and i2b2 databases"
-#    sudo docker exec "$container" psql -U postgres -c "CREATE DATABASE aktin;"
-#    sudo docker exec "$container" psql -U postgres -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
-#
-#    # Recreate i2b2 database with all required users and schemas
-#    sudo docker exec "$container" psql -U postgres -c "CREATE DATABASE i2b2;"
-#    sudo docker exec "$container" psql -U postgres -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
+    cleanup+=("$path_to_pmcell_backup")
 
     echo "importing the backup of aktin and i2b2 databases"
-    # from the host
-    sudo docker exec -i "$container" psql -U postgres -q -d i2b2 < "$backup_folder/backup_i2b2.sql"
-    sudo docker exec -i "$container" psql -U postgres -q -d aktin < "$backup_folder/backup_aktin.sql"
+    sudo docker exec -i "$container" psql -U postgres -q -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null 2>&1  # is path on host
+    sudo docker exec -i "$container" psql -U postgres -q -d aktin < "$backup_folder/backup_aktin.sql" > /dev/null 2>&1
 
     # Restore the pm_cell_data table from the temporary backup
-    echo "import pm cells"
-#    sudo docker exec "$container" psql -U postgres -d i2b2 -q -c "DROP TABLE IF EXISTS i2b2pm.pm_cell_data;" > /dev/null
-    sudo docker exec "$container" psql -U postgres -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;"
+    echo "importing pm cells"
+    sudo docker exec "$container" psql -U postgres -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null 2>&1
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$path_to_pmcell_backup"
-    # Clean up temporary backup file
-    sudo docker exec "$container" rm "$path_to_pmcell_backup"
 }
 
 import_config() {
@@ -218,6 +135,12 @@ import_config() {
 
   echo "importing config from: $src_path to: $target_path"
   sudo docker cp "$src_path" "$target_path"
+}
+
+clean() {
+    for path in "${cleanup[@]}"; do
+        sudo rm -rf "$path"
+    done
 }
 
 main() {
@@ -231,7 +154,6 @@ main() {
     local backup_dir_docker="/var/tmp"  # target path inside the container
     echo "extract backup-tar on host"
     local backup_dir_host=$(extract_tar "$tarfile")
-#    local backup_folder=$(copy_to_container "$postgres_container" "$backup_dir_host" "$backup_dir_docker")
 
     stop_db_users   # remove database lock
     import_databases_backup "$backup_dir_host" "$postgres_container"
@@ -248,7 +170,7 @@ main() {
     sudo docker exec -u 0 "$wildfly_container" chown -R wildfly:wildfly /var/lib/aktin
 
     restart_aktin_services
-    remove_dir "$(dirname "$backup_dir_host")"
+    clean
     echo "migration completed"
 }
 
