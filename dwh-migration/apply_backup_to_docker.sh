@@ -1,40 +1,41 @@
 #!/bin/bash
 #--------------------------------------
-# Script Name:  apply_backup_to_docker.sh
-# Version:      1.0
-# Author:       whoy@ukaachen.de
-# Date:         4 Jun 25
-# Purpose:      Applies the database backup from dwh backup tar-file and applies it to the docker dwh postgres container
-#               given tar.gz file
+# Script: apply_backup_to_docker.sh
+# Version: 1.0
+# Author:  whoy@ukaachen.de
+# Date:    2025-06-04
+# Purpose: Restore i2b2/aktin DBs from a given tar.gz into the target DWH
+#          Docker stack (PostgreSQL + WildFly + Apache HTTPD).
 #--------------------------------------
 
 set -euo pipefail
 
+# Require root to manage containers and copy files
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"
     exit 1
 fi
 
-# ensure the correct number of arguments is provided
+# Args: <backup.tar.gz> <wildfly_container> <postgres_container> <httpd_container>
 [[ $# -ne 4 ]] && {
     echo "Usage: $0 <path_to_backup_tarfile> <wildfly_container_name> <postgres_container_name> <httpd_container>"
     exit 1
 }
 
-readonly tarfile="$1"
+readonly backup_tar="$1"
 readonly wildfly_container="$2"
 readonly postgres_container="$3"
 readonly apache_container="$4"
 readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log
-cleanup=()
+host_tmp_paths=()
 
-
-check_containers_same_dwh() {
+# Verify the three container names look like the same stack by prefix
+assert_same_prefix() {
   project_name_postgres="${postgres_container%%-*}"
   project_name_apache="${apache_container%%-*}"
   project_name_wildfly="${wildfly_container%%-*}"
 
-  # Compare prefixes
+  # Compare prefixes (warn if mixed)
   if [[ "$project_name_postgres" == "$project_name_wildfly" && "$project_name_wildfly" == "$project_name_wildfly" ]]; then
       echo "All variables share the same prefix: $project_name_postgres"
   else
@@ -47,7 +48,7 @@ check_containers_same_dwh() {
   fi
 }
 
-# Exits script if given container is not running
+# Fail fast if a required container isn’t running
 exit_if_container_down() {
   local container_name="$1"
 
@@ -60,7 +61,7 @@ exit_if_container_down() {
   fi
 }
 
-# Enable database migration by stopping all containers, depending on- and thereby locking the database for changes
+# Stop frontend/app containers to open DB for changes
 stop_db_users() {
     echo "stop container $apache_container"
     sudo docker container stop "$apache_container"
@@ -68,68 +69,71 @@ stop_db_users() {
     sudo docker container stop "$wildfly_container"
 }
 
+# Bring WildFly back early (needed after DB restore for config copy)
 start_wildfly() {
     echo "starting wildfly container: $wildfly_container"
     sudo docker container start "$wildfly_container"
 }
 
-restart_aktin_services() {
+# Restart full stack after import and file copies
+restart_stack() {
     echo "starting aktin services"
     sudo docker container restart "$postgres_container"
     sudo docker container restart "$apache_container"
     sudo docker container restart "$wildfly_container"
 }
 
-
-# Extracts a given tar file inside a temporary directory
+# Untar backup into a temp dir and return the single top-level folder path
 extract_tar() {
     local tar="$1"
     local temp_dir
 
     temp_dir=$(mktemp -d -p "$PWD")
-    cleanup+=("$temp_dir")
-    # Extract and copy in one go
+    host_tmp_paths+=("$temp_dir")
     tar -xf "$tar" -C "$temp_dir"
-    # Get the single extracted folder name
+
+    # Expect exactly one folder in the archive
     local folder
     folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
-    # Check if there's exactly one directory
     if [[ $(echo "$folder" | wc -l) -ne 1 ]]; then
         echo "Error: Archive contains multiple folders or no folders" >&2
         rm -rf "$temp_dir"
         return 1
     fi
-    # Get just the folder name (basename)
+
     local folder_name
     folder_name=$(basename "$folder")
-
     echo "$temp_dir/$folder_name"
 }
 
+# Simple helper (currently unused)
 remove_dir() {
     rm -rf "$1"
 }
 
-import_databases_backup() {
-    local backup_folder=$1      # Path to backup folder inside container
+# Restore DBs from SQL dumps, preserving pm_cell_data then reapplying it
+restore_databases() {
+    local backup_folder=$1      # Host path to extracted backup folder
     local container=$2          # PostgreSQL container name
-    local path_to_pmcell_backup="/tmp/pmbackup.sql"  # Temporary backup file for pm_cell_data table
+    local path_to_pmcell_backup="/tmp/pmbackup.sql"  # Temp file inside container
 
-    # Create a backup of pm_cell_data inside the container
+    # Snapshot i2b2pm.pm_cell_data before full import
     sudo docker exec -it "$container" sh -c "pg_dump -U postgres -t i2b2pm.pm_cell_data i2b2 --data-only > $path_to_pmcell_backup"
-    cleanup+=("$path_to_pmcell_backup")
+    host_tmp_paths+=("$path_to_pmcell_backup")
 
     echo "importing the backup of aktin and i2b2 databases"
-    sudo docker exec -i "$container" psql -U postgres -q -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null 2>&1  # is path on host
+    # Import i2b2 and aktin from host-side SQL dumps
+    sudo docker exec -i "$container" psql -U postgres -q -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null 2>&1
     sudo docker exec -i "$container" psql -U postgres -q -d aktin < "$backup_folder/backup_aktin.sql" > /dev/null 2>&1
 
-    # Restore the pm_cell_data table from the temporary backup
+    # Reapply pm_cell_data
     echo "importing pm cells"
     sudo docker exec "$container" psql -U postgres -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null 2>&1
     sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$path_to_pmcell_backup"
 }
 
-import_config() {
+# Copy a config file (host → container target path)
+copy_config_into_container() {
   local src_path="$1"
   local target_path="$2"
 
@@ -137,40 +141,42 @@ import_config() {
   sudo docker cp "$src_path" "$target_path"
 }
 
-clean() {
-    for path in "${cleanup[@]}"; do
+# Remove any host-side temp artifacts tracked in host_tmp_paths[]
+cleanup_host_temp() {
+    for path in "${host_tmp_paths[@]}"; do
         sudo rm -rf "$path"
     done
 }
 
 main() {
-    # Validate script variables
-    check_containers_same_dwh   # check if test-containers originate from same data warehouse
+    # Sanity checks
+    assert_same_prefix
     exit_if_container_down "$postgres_container"
     exit_if_container_down "$apache_container"
     exit_if_container_down "$wildfly_container"
 
-    # Copy backup to container
-    local backup_dir_docker="/var/tmp"  # target path inside the container
+    # Extract backup on host; use extracted folder for file/db imports
+    local backup_dir_docker="/var/tmp"  # target path inside the container (not used)
     echo "extract backup-tar on host"
-    local backup_dir_host=$(extract_tar "$tarfile")
+    local backup_dir_host=$(extract_tar "$backup_tar")
 
-    stop_db_users   # remove database lock
-    import_databases_backup "$backup_dir_host" "$postgres_container"
+    # Remove DB locks and import new DB
+    stop_db_users
+    restore_databases "$backup_dir_host" "$postgres_container"
     start_wildfly
 
-    # import static config files standalone.xml
-    import_config "$backup_dir_host/backup_standalone.xml" "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
-    import_config "$backup_dir_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
-    import_config "$backup_dir_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
+    # Push WildFly/i2b2/aktin config files
+    copy_config_into_container "$backup_dir_host/backup_standalone.xml" "$wildfly_container:/opt/wildfly/standalone/configuration/backup_standalone.xml"
+    copy_config_into_container "$backup_dir_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
+    copy_config_into_container "$backup_dir_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
 
-    # import /var/lib/aktin
+    # Push /var/lib/aktin payload and fix ownership
     sudo docker cp "$backup_dir_host/var/lib/aktin" "$wildfly_container:/var/lib"
-    # give wildfly permission for /var/lib/aktin
     sudo docker exec -u 0 "$wildfly_container" chown -R wildfly:wildfly /var/lib/aktin
 
-    restart_aktin_services
-    clean
+    # Bring everything back up and clean host temp files
+    restart_stack
+    cleanup_host_temp
     echo "migration completed"
 }
 
