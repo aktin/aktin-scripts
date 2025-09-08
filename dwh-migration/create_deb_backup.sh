@@ -1,11 +1,11 @@
 #!/bin/bash
 #--------------------------------------
-# Script Name:  create_aktin_backup.sh
-# Version:      1.0
-# Author:       akombeiz@ukaachen.de
-# Date:         25 Apr 24
+# Script Name:  create_deb_backup.sh
+# Version:      2.0
+# Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
+# Date:         08 Sep 25
 # Purpose:      Backups database and configuration files of an AKTIN DWH as a tar.gz. Used for the
-#               migration from version 1.4 (install-script) to version 1.5 (debian package)
+#               migration from version 1.4 (install-script) to version 1.5 (debian package) and now version 1.6 (docker)
 #--------------------------------------
 
 set -euo pipefail

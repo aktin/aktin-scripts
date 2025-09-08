@@ -8,7 +8,7 @@
 #               containing data and configurations of the original
 #--------------------------------------
 
-
+# Require root to avoid permission errors
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"
     exit 1
@@ -27,6 +27,7 @@ readonly current=$(date +%Y_%h_%d_%H%M)
 readonly log=create_aktin_backup_$current.log
 
 
+# Fail fast if a required container isn't running
 check_container_running() {
   local container_name="$1"
 
@@ -39,6 +40,7 @@ check_container_running() {
   fi
 }
 
+# Copy a file/dir from container to host staging area
 backup_docker_resource() {
     local resource="$1"
     local destination="$2"
@@ -52,25 +54,19 @@ create_dir() {
     echo $dir
 }
 
+# Dump a PostgreSQL database from inside the container to a host file
 backup_database() {
     local db="$1"
     local destination="$2"
     local container_dest="/tmp/backup_$db.sql"
 
     echo -e "create backup of database $db"
-#    sudo docker exec -it "$postgres_container" "pg_dump -U postgres $db > $container_dest"
-    docker exec -u postgres "$postgres_container" bash -c "pg_dump -U postgres $db > $destination"
-
-    # opy backup file to host
-#    sudo docker cp "$postgres_container:$container_dest" "$destination"
+    docker exec -u postgres "$postgres_container" pg_dump -U postgres $db > $destination
 }
 
+# compresses the backup files into athe final tar.gz archive
 tar_dir()  {
     tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
-}
-
-remove_dir() {
-    rm -rf $1
 }
 
 
@@ -78,7 +74,7 @@ main() {
   check_container_running "$wildfly_container"
   check_container_running "$postgres_container"
 
-  # prepare
+  # create backup dir and fill with backup files
   local tmp_dir=$(create_dir "backup_$current")
   # backup configuration files from container
   backup_docker_resource "$wildfly_container:/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
@@ -91,10 +87,10 @@ main() {
   backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
   backup_database "aktin" "$tmp_dir/backup_aktin.sql"
 
-   tar_dir "$tmp_dir"
-    remove_dir "$tmp_dir"
-    echo "backup completed"
-
+  # create final compressed backup file
+  tar_dir "$tmp_dir"
+  rm -rf "$tmp_dir"
+  echo "backup completed"
 }
 
 main | tee -a "$log"
