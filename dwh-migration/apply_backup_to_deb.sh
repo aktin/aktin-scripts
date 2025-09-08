@@ -1,6 +1,6 @@
 #!/bin/bash
 #--------------------------------------
-# Script Name:  apply_deb_backup.sh
+# Script Name:  apply_backup_to_deb.sh
 # Version:      2.0
 # Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
 # Date:         08 SEP 25
