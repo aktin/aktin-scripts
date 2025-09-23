@@ -35,7 +35,8 @@ assert_same_prefix() {
   project_name_apache="${apache_container%%-*}"
   project_name_wildfly="${wildfly_container%%-*}"
 
-  # Compare prefixes (warn if mixed)
+  # Validate containers are part of the same data warehouse instance, by matching container-name prefixes.
+  # Important test for setups composed of multiple docker data warehouses
   if [[ "$project_name_postgres" == "$project_name_wildfly" && "$project_name_wildfly" == "$project_name_wildfly" ]]; then
       echo "All variables share the same prefix: $project_name_postgres"
   else
