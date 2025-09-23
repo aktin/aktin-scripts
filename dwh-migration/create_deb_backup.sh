@@ -28,10 +28,8 @@ fi
 
 create_dir() {
     local dir=$1
-    if [ ! -d $dir ]; then
-        mkdir $dir
-    fi
-    echo $dir
+    mkdir -p "$dir"
+    echo "$dir"
 }
 
 remove_dir() {
@@ -70,14 +68,6 @@ backup_i2b2() {
     sudo -u postgres pg_dump $db --clean > "$destination"
 }
 
-backup_globals() {
-  # Globals contain cluster data of a postgresql cluster. It involves ownerships,
-  # table structures and other metadata and is necessary for migration,
-  # especially when using data-only dump files
-  local destination=$1
-  sudo -u postgres pg_dumpall --globals-only > "$destination"
-}
-
 main() {
     local tmp_dir=$(create_dir "backup_$current")
 	
@@ -88,7 +78,6 @@ main() {
     create_dir "$tmp_dir/var/lib"
     create_dir "$tmp_dir/var/lib/aktin"
     backup_folder "/var/lib/aktin" "$tmp_dir/var/lib/aktin"
-    backup_globals "$tmp_dir/globals_backup.sql"
     backup_i2b2 "$tmp_dir/backup_i2b2.sql"
     backup_aktin "aktin" "$tmp_dir/backup_aktin.sql"
 
