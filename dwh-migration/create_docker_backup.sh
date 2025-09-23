@@ -23,7 +23,7 @@ readonly wildfly_container="$1"
 readonly postgres_container="$2"
 
 # create timestamp and log file
-readonly current=$(date +%Y_%h_%d_%H%M)
+readonly current="$(date +%Y_%h_%d_%H%M)"
 readonly log=create_aktin_backup_$current.log
 
 
@@ -50,21 +50,20 @@ backup_docker_resource() {
 
 create_dir() {
     local dir=$1
-    mkdir -p $dir
-    echo $dir
+    mkdir -p "$dir"
+    echo "$dir"
 }
 
 # Dump a PostgreSQL database from inside the container to a host file
 backup_database() {
     local db="$1"
     local destination="$2"
-    local container_dest="/tmp/backup_$db.sql"
 
     echo -e "create backup of database $db"
-    docker exec -u postgres "$postgres_container" pg_dump -U postgres $db > $destination
+    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" > "$destination"
 }
 
-# compresses the backup files into athe final tar.gz archive
+# compresses the backup files into the final tar.gz archive
 tar_dir()  {
     tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
 }

@@ -83,7 +83,7 @@ restart_stack() {
     sudo docker container restart "$wildfly_container"
 }
 
-# Untar backup into a temp dir and return the single top-level folder path
+# Un-tar backup into a temp dir and return the single top-level folder path
 extract_tar() {
     local tar="$1"
     local temp_dir
@@ -156,7 +156,6 @@ main() {
     exit_if_container_down "$wildfly_container"
 
     # Extract backup on host; use extracted folder for file/db imports
-    local backup_dir_docker="/var/tmp"  # target path inside the container (not used)
     echo "extract backup-tar on host"
     local backup_dir_host=$(extract_tar "$backup_tar")
 
