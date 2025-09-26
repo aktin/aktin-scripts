@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
-# Script Name:  apply_aktin_backup.sh
-# Version:      1.0
-# Author:       akombeiz@ukaachen.de
-# Date:         25 Apr 24
+# Script Name:  apply_backup_to_deb.sh
+# Version:      2.0
+# Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
+# Date:         08 SEP 25
 # Purpose:      Installs a new AKTIN DWH from repository and fills it with backed up data from a
 #               given tar.gz file
 #--------------------------------------
@@ -59,7 +59,7 @@ install_aktin_packages() {
     apt-get update && apt-get install -y ca-certificates
     # echo  "Acquire { https::Verify-Peer false }" > /etc/apt/apt.conf.d/99verify-peer.conf
     wget -O - https://www.aktin.org/software/repo/org/apt/conf/aktin.gpg.key | sudo apt-key add -
-    echo "deb https://www.aktin.org/software/repo/org/apt focal main" >/etc/apt/sources.list.d/aktin.list
+    echo "deb https://www.aktin.org/software/repo/org/apt jammy main" >/etc/apt/sources.list.d/aktin.list
     echo "installing aktin packages"
     apt-get update
     apt-get install -y aktin-notaufnahme-i2b2

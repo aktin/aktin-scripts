@@ -1,11 +1,11 @@
 #!/bin/bash
 #--------------------------------------
-# Script Name:  create_aktin_backup.sh
-# Version:      1.0
-# Author:       akombeiz@ukaachen.de
-# Date:         25 Apr 24
+# Script Name:  create_deb_backup.sh
+# Version:      2.0
+# Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
+# Date:         08 Sep 25
 # Purpose:      Backups database and configuration files of an AKTIN DWH as a tar.gz. Used for the
-#               migration from version 1.4 (install-script) to version 1.5 (debian package)
+#               migration from version 1.4 (install-script) to version 1.5 (debian package) and now version 1.6 (docker)
 #--------------------------------------
 
 set -euo pipefail
@@ -28,10 +28,8 @@ fi
 
 create_dir() {
     local dir=$1
-    if [ ! -d $dir ]; then
-        mkdir $dir
-    fi
-    echo $dir
+    mkdir -p "$dir"
+    echo "$dir"
 }
 
 remove_dir() {
@@ -56,16 +54,23 @@ backup_folder() {
     cp -r $folder/* $destination
 }
 
-backup_database() {
+backup_aktin() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db >$destination
+    sudo -u postgres pg_dump $db --clean > "$destination"
+}
+
+backup_i2b2() {
+    local db="i2b2"
+    local destination=$1
+    echo -e "backing up $db"
+    sudo -u postgres pg_dump $db --clean > "$destination"
 }
 
 main() {
     local tmp_dir=$(create_dir "backup_$current")
-
+	
     backup_file "/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
     backup_file "$wildfly_home/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
     backup_file "$wildfly_home/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
@@ -73,8 +78,8 @@ main() {
     create_dir "$tmp_dir/var/lib"
     create_dir "$tmp_dir/var/lib/aktin"
     backup_folder "/var/lib/aktin" "$tmp_dir/var/lib/aktin"
-    backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
-    backup_database "aktin" "$tmp_dir/backup_aktin.sql"
+    backup_i2b2 "$tmp_dir/backup_i2b2.sql"
+    backup_aktin "aktin" "$tmp_dir/backup_aktin.sql"
 
     tar_dir "$tmp_dir"
     remove_dir "$tmp_dir"
