@@ -101,7 +101,6 @@ main() {
   local cutoff_ts
   local readable_cutoff
   local ids
-  touch "$LOG_FILE"
 
   cutoff_ts=$(date -d "now - $MIN_AGE" +%s)
   readable_cutoff=$(date -d @$cutoff_ts)
