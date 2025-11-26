@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #--------------------------------------
 # Script Name:  docker_delete_encounter.sh
-# Version:      1.2
+# Version:      1.0
 # Author:       whoy@ukaachen.de
 # Date:         25 Nov 25
 # Purpose:      Delete encounter window from database of a Docker DWH (from yyyymmdd inclusive to yyyymmdd exclusive)
