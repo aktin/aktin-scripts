@@ -63,10 +63,10 @@ get_request_timestamp() {
   local request_id="$1"
   local response
   local date_str
-  response=$(curl -s --request OPTIONS "$BROKER_URL/request/$request_id" --header "$AUTH_HEADER")
-  date_str=$(echo "$response" | grep -oP '(?<=<published>)[^<]+')
+  response=$(curl -s --request GET "$BROKER_URL/request/$request_id" --header "$AUTH_HEADER")
+  date_str=$(echo "$response" | grep -oP '(?<=<scheduled>)[^<]+')
   if [[ -n "$date_str" ]]; then
-    date -d "$date_str" +%s # Convert published date to timestamp
+    date -d "$date_str" +%s # Convert execution date to timestamp
   else
     echo "0" # Return 0 if date not found
   fi
