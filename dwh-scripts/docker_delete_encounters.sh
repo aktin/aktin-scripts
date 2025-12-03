@@ -35,36 +35,27 @@ check_date_order() {
   (( s <= e ))
 }
 
-# Displaying running containers. DWH containers encode the DWH instance in its name
-select_instance_prefix() {
-  local running
-  running=$(docker ps --format '{{.Names}}' || true)
-  [[ -n "$running" ]] || { echo "No running containers found." >&2; return 1; }
+ check_dwh_prefix() {
+   local prefix="$1"
+   local postgres="${prefix}-database-1"
+   local wildfly="${prefix}-wildfly-1"
 
-  local -a prefixes
-  mapfile -t prefixes < <(printf "%s\n" "$running" | awk -F'-' '{print $1}' | sort -u)
-  ((${#prefixes[@]})) || { echo "No prefixes could be derived." >&2; return 1; }
+   local running
+   running=$(docker ps --format '{{.Names}}' || true)
+   [[ -n "$running" ]] || { echo "No running containers found." >&2; return 1; }
 
-  # Use fd 3 for the actual return value; send all UI noise to stderr.
-  exec 3>&1
-  {
-    echo "Select DWH to delete cases from:"
-    PS3="Enter number (or Ctrl-C to quit): "
-    local p
-    select p in "${prefixes[@]}"; do
-      if [[ -n "${p:-}" ]]; then
-        printf "%s\n" "$p" >&3   # ONLY this goes to captured stdout
-        return 0
-      fi
-      echo "Invalid choice. Try again."
-    done
-  } 1>&2
-}
+   echo "$running" | grep -Fqx "$postgres" || {
+     echo "ERROR: PostgreSQL container '$postgres' with prefix '$prefix' is not running." >&2
+     return 1
+   }
 
-service_running() {
-  local name="$1"
-  docker ps --format '{{.Names}}' | grep -Fqx "$name"
-}
+   echo "$running" | grep -Fqx "$wildfly" || {
+     echo "ERROR: WildFly container '$wildfly' with prefix '$prefix' is not running." >&2
+     return 1
+   }
+
+   return 0
+ }
 
 get_container_id() {
   local name="$1"
@@ -106,38 +97,31 @@ execute_sql() {
 main() {
   check_root
 
-  if [[ $# -ne 2 ]]; then
-    die "Two arguments are required. Usage: $0 yyyymmdd yyyymmdd"
+  if [[ $# -ne 3 ]]; then
+    die "Three arguments are required. Usage: $0 yyyymmdd yyyymmdd prefix"
   fi
 
-  local start_date="$1" end_date="$2"
+  local start_date="$1" end_date="$2" DWH_PREFIX="$3"
   validate_date "$start_date" || die "Invalid start date"
   validate_date "$end_date"   || die "Invalid end date"
   check_date_order "$start_date" "$end_date" || die "Start date must be <= end date"
 
   note "Start Date: $start_date and End Date: $end_date are valid."
+  note "Using DWH prefix: $DWH_PREFIX"
 
-  local DWH_PREFIX
-  DWH_PREFIX="$(select_instance_prefix)" || die "No instance selected."
-  note "Selected prefix: $DWH_PREFIX"
+  check_dwh_prefix "$DWH_PREFIX" || die "Required container with prefix "$DWH_PREFIX" does not exist."
 
   local postgres="${DWH_PREFIX}-database-1"
   local wildfly="${DWH_PREFIX}-wildfly-1"
 
-  service_running "$postgres" || die "PostgreSQL service '$postgres' is not running. Please start it and try again."
-
-  local wildfly_was_running=0
-  if service_running "$wildfly"; then
-    wildfly_was_running=1
-    local wf_id
-    wf_id="$(get_container_id "$wildfly")"
-    [[ -n "$wf_id" ]] || die "Could not resolve ID for '$wildfly'."
-    note "Stopping WildFly ($wildfly)…"
-    docker stop "$wildfly" >/dev/null
+  local wildfly_was_running=1
+  note "Stopping WildFly ($wildfly)…"
+  docker stop "$wildfly" >/dev/null || wildfly_was_running=0
+  if (( wildfly_was_running == 1 )); then
     wait_until_stopped "$wildfly" 90
-    note "WildFly has stopped."
+    note "WildFly stopped."
   else
-    note "WildFly ($wildfly) is not running."
+    note "WildFly was not running."
   fi
 
   note "Executing SQL query on $postgres…"
