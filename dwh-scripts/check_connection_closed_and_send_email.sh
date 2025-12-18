@@ -18,22 +18,18 @@ for cmd in curl jq; do
 done
 
 # Email Settings (SMTP)
-SMTP_SERVER='localhost'
-SMTP_PORT='1025'
-SMTP_USER=''
-SMTP_PASS=''
-MAIL_FROM='test@outlook.com'
-
-# Set Aktin DWH Variables
+SMTP_SERVER='CHANGEME'
+SMTP_PORT='CHANGEME'
+SMTP_USER='CHANGEME'
+SMTP_PASS='CHANGEME'
+MAIL_FROM='CHANGEME'
+RECIPIENTS='CHANGEME' # comma-separated
 AKTIN_DWH_URL='http://localhost:80'
+
 IMPORT_ENDPOINT="${AKTIN_DWH_URL}/aktin/admin/rest/import-summary"
-
-RECIPIENTS='aivanets@ukaachen.de'
-
 
 result=$(curl -s -k "$IMPORT_ENDPOINT")
 import_summary_errors=$(echo "$result" | jq -r '.error | join(", ")' || echo "")
-
 
 if [[ "$import_summary_errors" != *"error: This connection has been closed"* ]]; then
     echo "Connection error found. Sending bulk alert..."
@@ -44,7 +40,6 @@ if [[ "$import_summary_errors" != *"error: This connection has been closed"* ]];
         MAIL_ARGS+=("--mail-rcpt" "$rec")
     done
 
-    # Send Email
     # We use --fail to ensure curl exits with an error code if Auth fails
     if ! curl --fail --ssl-reqd \
       --url "smtp://${SMTP_SERVER}:${SMTP_PORT}" \
