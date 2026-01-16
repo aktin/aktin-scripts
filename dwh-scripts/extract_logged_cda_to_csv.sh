@@ -19,7 +19,8 @@ if ! command -v xmllint &> /dev/null; then
   exit 1
 fi
 
-ALLOWED_POSTAL_CODES=("1","2")
+# set to "ALL" to disable zipcode filtering
+ALLOWED_POSTAL_CODES=("ALL")
 
 # setup paths
 AKTIN_PROPERTIES_PATH="$1"
@@ -59,12 +60,12 @@ get_xml_val() {
 
 is_postal_code_allowed() {
   local postal_code="$1"
-    for allowed_code in "${ALLOWED_POSTAL_CODES[@]}"; do
-      if [[ "$postal_code" == "$allowed_code" ]]; then
-        return 0
-      fi
-    done
-  return 1  # Postal code is not allowed
+  for allowed_code in "${ALLOWED_POSTAL_CODES[@]}"; do
+    if [[ "$allowed_code" == "ALL" ]] || [[ "$postal_code" == "$allowed_code" ]]; then
+      return 0
+    fi
+  done
+  return 1 # Postal code is not allowed
 }
 
 parse_cda_file() {
