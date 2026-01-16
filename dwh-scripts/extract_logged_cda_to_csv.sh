@@ -75,9 +75,11 @@ parse_cda_file() {
     return 1
   fi
   # extract zipcode first to filter immediately
+  local filename=$(basename "$cda_file")
   local zipcode=$(get_xml_val "string(//*[local-name()='postalCode']/text())" "$cda_file")
   if ! is_postal_code_allowed "$zipcode"; then
-    return
+      echo "Skipping '$filename': ZIP '$zipcode' not allowed"
+      return
   fi
   local encounter_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
   local street_address=$(get_xml_val "string(//*[local-name()='streetAddressLine']/text())" "$cda_file")
@@ -90,8 +92,7 @@ parse_cda_file() {
   # get all diagnosis fields
   local diagnosis=$(xmllint --xpath "//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.424']/@code" "$cda_file" 2>/dev/null | grep -oP '(?<=code=")[^"]*' | paste -sd "," -)
   if [ -z "$diagnosis" ]; then diagnosis="NA"; fi
-  local file_name=$(basename "$cda_file")
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$encounter_id" "$zipcode" "$street_address" "$birth_date" "$gender" "$admission_date" "$discharge_date" "$discharge_code" "$cedis_code" "$diagnosis" "$file_name" >> "$CSV_FILE"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$encounter_id" "$zipcode" "$street_address" "$birth_date" "$gender" "$admission_date" "$discharge_date" "$discharge_code" "$cedis_code" "$diagnosis" "$filename" >> "$CSV_FILE"
 }
 
 process_all_cda_files_in_dir() {
