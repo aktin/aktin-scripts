@@ -61,11 +61,6 @@ select_instance_prefix() {
   } 1>&2
 }
 
-service_running() {
-  local name="$1"
-  docker ps --format '{{.Names}}' | grep -Fqx "$name"
-}
-
 get_container_id() {
   local name="$1"
   if docker inspect --type container "$name" &>/dev/null; then
@@ -73,6 +68,11 @@ get_container_id() {
     return 0
   fi
   docker ps -aqf "name=^${name}$" || true
+}
+
+service_running() {
+  local name="$1"
+  docker ps --format '{{.Names}}' | grep -Fqx "$name"
 }
 
 wait_until_stopped() {
@@ -106,20 +106,27 @@ execute_sql() {
 main() {
   check_root
 
-  if [[ $# -ne 2 ]]; then
-    die "Two arguments are required. Usage: $0 yyyymmdd yyyymmdd"
+  if [[ $# -ne 2 && $# -ne 3 ]]; then
+    die "Two arguments are required. Usage: $0 yyyymmdd yyyymmdd [DWH_PREFIX]"
   fi
 
-  local start_date="$1" end_date="$2"
+  local start_date="$1"
+  local end_date="$2"
+  local DWH_PREFIX
+
   validate_date "$start_date" || die "Invalid start date"
   validate_date "$end_date"   || die "Invalid end date"
   check_date_order "$start_date" "$end_date" || die "Start date must be <= end date"
 
   note "Start Date: $start_date and End Date: $end_date are valid."
 
-  local DWH_PREFIX
-  DWH_PREFIX="$(select_instance_prefix)" || die "No instance selected."
-  note "Selected prefix: $DWH_PREFIX"
+  if [[ $# -eq 3 ]]; then
+      DWH_PREFIX="$3"
+      note "DWH prefix: $DWH_PREFIX"
+  else
+      DWH_PREFIX="$(select_instance_prefix)" || die "No instance selected."
+      note "Selected DWH prefix: $DWH_PREFIX"
+  fi
 
   local postgres="${DWH_PREFIX}-database-1"
   local wildfly="${DWH_PREFIX}-wildfly-1"
