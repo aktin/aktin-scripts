@@ -2,7 +2,7 @@
 #--------------------------------------
 # Script Name:  extract_logged_cda_to_csv.sh
 # Version:      1.2
-# Author:       jbienzeisler@ukaachen.de. akombeiz@ukaachen.de, jkramer@ukaachen.de
+# Author:       jbienzeisler@ukaachen.de, akombeiz@ukaachen.de, jkramer@ukaachen.de
 # Date:         10 Oct 24
 # Purpose:      This script processes CDA (Clinical Document Architecture) XML files in a specified directory, extracts
 #               specific medical data fields, and saves the results into a timestamped CSV file while logging errors.
@@ -44,7 +44,7 @@ extract_roots_from_aktin_properties() {
 initialize_csv_file_if_nonexisting() {
   local csv_file="$1"
   if [ ! -f "$csv_file" ]; then
-    echo "\"Birth Date\",\"Gender\",\"Admission Date\",\"Discharge Date\",\"CEDIS Code\",\"MTS Score\",\"Transfer\",\"Postal Code\",\"Street Address\",\"Discharge Code\",\"Document ID\",\"Internal Case Number\",\"Diagnosis\",\"File\"" > "$csv_file"
+    echo "\"encounter_id\",\"zipcode\",\"street_address\",\"birth_date\",\"gender\",\"admission_date\",\"discharge_date\",\"discharge_code\",\"cedis_code\",\"diagnosis\",\"file\"" > "$csv_file"
   fi
 }
 
@@ -72,21 +72,18 @@ parse_cda_file() {
     echo "Error: File $(basename "$cda_file") is not a valid CDA file." >&2
     return 1
   fi
+  local encounter_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
+  local zipcode=$(get_xml_val "string(//*[local-name()='postalCode']/text())" "$cda_file")
+  local street_address=$(get_xml_val "string(//*[local-name()='streetAddressLine']/text())" "$cda_file")
   local birth_date=$(get_xml_val "string(//*[local-name()='birthTime']/@value)" "$cda_file")
   local gender=$(get_xml_val "string(//*[local-name()='administrativeGenderCode']/@code)" "$cda_file")
   local admission_date=$(get_xml_val "string(//*[local-name()='encompassingEncounter']/*[local-name()='effectiveTime']/*[local-name()='low']/@value)" "$cda_file")
   local discharge_date=$(get_xml_val "string(//*[local-name()='encompassingEncounter']/*[local-name()='effectiveTime']/*[local-name()='high']/@value)" "$cda_file")
-  local cedis_code=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.439']/@code)" "$cda_file")
-  local mts_score=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.438']/@code)" "$cda_file")
-  local transfer=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.3.1.195.5.53']/@code)" "$cda_file")
-  local postal_code=$(get_xml_val "string(//*[local-name()='postalCode']/text())" "$cda_file")
-  local street_address=$(get_xml_val "string(//*[local-name()='streetAddressLine']/text())" "$cda_file")
   local discharge_code=$(get_xml_val "string(//*[local-name()='dischargeDispositionCode']/@code)" "$cda_file")
-  local document_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
-  local internal_case_number=$(get_xml_val "string(//*[local-name()='id'][@root='$billing_root']/@extension)" "$cda_file")
+  local cedis_code=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.439']/@code)" "$cda_file")
   local diagnosis=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.424']/@code)" "$cda_file")
   local file_name=$(basename "$cda_file")
-  echo "\"$birth_date\",\"$gender\",\"$admission_date\",\"$discharge_date\",\"$cedis_code\",\"$mts_score\",\"$transfer\",\"$postal_code\",\"$street_address\",\"$discharge_code\",\"$document_id\",\"$internal_case_number\",\"$diagnosis\",\"$file_name\"" >> "$CSV_FILE"
+  echo "\"$encounter_id\",\"$zipcode\",\"$street_address\",\"$birth_date\",\"$gender\",\"$admission_date\",\"$discharge_date\",\"$discharge_code\",\"$cedis_code\",\"$diagnosis\",\"$file_name\"" >> "$CSV_FILE"
 }
 
 process_all_cda_files_in_dir() {
