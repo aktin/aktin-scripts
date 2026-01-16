@@ -3,7 +3,7 @@
 # Script Name:  extract_logged_cda_to_csv.sh
 # Version:      1.2
 # Author:       jbienzeisler@ukaachen.de, akombeiz@ukaachen.de, jkramer@ukaachen.de
-# Date:         10 Oct 24
+# Date:         16 Jan 26
 # Purpose:      This script processes CDA (Clinical Document Architecture) XML files in a specified directory, extracts
 #               specific medical data fields, and saves the results into a timestamped CSV file while logging errors.
 #--------------------------------------
