@@ -1,8 +1,8 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  extract_logged_cda_to_csv.sh
-# Version:      1.1
-# Author:       jbienzeisler@ukaachen.de & akombeiz@ukaachen.de
+# Version:      1.2
+# Author:       jbienzeisler@ukaachen.de. akombeiz@ukaachen.de, jkramer@ukaachen.de
 # Date:         10 Oct 24
 # Purpose:      This script processes CDA (Clinical Document Architecture) XML files in a specified directory, extracts
 #               specific medical data fields, and saves the results into a timestamped CSV file while logging errors.
@@ -13,6 +13,11 @@
   echo "Usage: $0 <path_to_aktin_properties> <path_to_cda_folder>"
   exit 1
 }
+
+if ! command -v xmllint &> /dev/null; then
+  echo "Error: libxml2-utils is required but not installed" >&2
+  exit 1
+fi
 
 # Config file and CDA directory
 AKTIN_PROPERTIES_PATH="$1"
