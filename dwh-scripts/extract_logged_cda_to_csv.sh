@@ -19,6 +19,8 @@ if ! command -v xmllint &> /dev/null; then
   exit 1
 fi
 
+ALLOWED_POSTAL_CODES=("1","2")
+
 # setup paths
 AKTIN_PROPERTIES_PATH="$1"
 CDA_DIR_PATH="$2"
@@ -38,13 +40,12 @@ extract_roots_from_aktin_properties() {
     exit 1
   fi
   encounter_root=$(grep -oP '(?<=cda.encounter.root.preset=)[^\r\n]+' "$aktin_properties")
-  billing_root=$(grep -oP '(?<=cda.billing.root.preset=)[^\r\n]+' "$aktin_properties")
 }
 
 initialize_csv_file_if_nonexisting() {
   local csv_file="$1"
   if [ ! -f "$csv_file" ]; then
-    echo "\"encounter_id\",\"zipcode\",\"street_address\",\"birth_date\",\"gender\",\"admission_date\",\"discharge_date\",\"discharge_code\",\"cedis_code\",\"diagnosis\",\"file\"" > "$csv_file"
+    printf "encounter_id\tzipcode\tstreet_address\tbirth_date\tgender\tadmission_date\tdischarge_date\tdischarge_code\tcedis_code\tdiagnosis\tfile\n" > "$csv_file"
   fi
 }
 
@@ -72,8 +73,12 @@ parse_cda_file() {
     echo "Error: File $(basename "$cda_file") is not a valid CDA file." >&2
     return 1
   fi
-  local encounter_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
+  # extract zipcode first to filter immediately
   local zipcode=$(get_xml_val "string(//*[local-name()='postalCode']/text())" "$cda_file")
+  if ! is_postal_code_allowed "$zipcode"; then
+    return
+  fi
+  local encounter_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
   local street_address=$(get_xml_val "string(//*[local-name()='streetAddressLine']/text())" "$cda_file")
   local birth_date=$(get_xml_val "string(//*[local-name()='birthTime']/@value)" "$cda_file")
   local gender=$(get_xml_val "string(//*[local-name()='administrativeGenderCode']/@code)" "$cda_file")
@@ -81,9 +86,11 @@ parse_cda_file() {
   local discharge_date=$(get_xml_val "string(//*[local-name()='encompassingEncounter']/*[local-name()='effectiveTime']/*[local-name()='high']/@value)" "$cda_file")
   local discharge_code=$(get_xml_val "string(//*[local-name()='dischargeDispositionCode']/@code)" "$cda_file")
   local cedis_code=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.439']/@code)" "$cda_file")
-  local diagnosis=$(get_xml_val "string(//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.424']/@code)" "$cda_file")
+  # get all diagnosis fields
+  local diagnosis=$(xmllint --xpath "//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.424']/@code" "$cda_file" 2>/dev/null | grep -oP '(?<=code=")[^"]*' | paste -sd "," -)
+  if [ -z "$diagnosis" ]; then diagnosis="NA"; fi
   local file_name=$(basename "$cda_file")
-  echo "\"$encounter_id\",\"$zipcode\",\"$street_address\",\"$birth_date\",\"$gender\",\"$admission_date\",\"$discharge_date\",\"$discharge_code\",\"$cedis_code\",\"$diagnosis\",\"$file_name\"" >> "$CSV_FILE"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$encounter_id" "$zipcode" "$street_address" "$birth_date" "$gender" "$admission_date" "$discharge_date" "$discharge_code" "$cedis_code" "$diagnosis" "$file_name" >> "$CSV_FILE"
 }
 
 process_all_cda_files_in_dir() {
