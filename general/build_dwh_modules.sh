@@ -4,7 +4,11 @@
 # Version:      2.0
 # Author:       whoy@ukaachen.de
 # Date:         11 Feb 26
-# Purpose:      Build DWH Maven modules, manages maven artifact versioning, creates and relocates EAR to target, manages EAR integration on target
+# Purpose:      Build DWH Maven modules, manages maven artifact versioning, creates and relocates EAR to target,
+#               manages EAR integration on target.
+# Usages:       ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects>
+#               ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects> -r true
+#               ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects> -b <project_name>
 #--------------------------------------
 
 set -euo pipefail
@@ -249,11 +253,14 @@ mvn_clean_install_module() {
   local -a required=()
   IFS=':' read -r -a required <<<"$required_str"
 
-  # Preserve your existing condition/behavior.
+  # if dependency is not a org.aktin dependency ($failed is empty), permit online mode and loading from maven store
+  # todo: add a whitelist/blacklist for these hard-coded modules
+  # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
   if { [[ -z "$failed" ]] && [[ "${required[1]}" != "$BASE_GROUP_ID"* ]]; } \
      || [[ "${required[1]}" == *"query-i2b2-sql"* ]] \
      || [[ "${required[1]}" == *"query-aggregate-rscript"* ]] \
      || [[ "${required[1]}" == *"query-model"* ]]; then
+
 
     log_debug "Missing artifact not in config projects; trying dependency:get for '${required[0]}:${required[1]}:${required[-1]}'"
 
@@ -506,6 +513,8 @@ mapfile -t dwh_ears < <(
     done
 )
 
+# todo: add multiple targets like docker instances
+# push new ear to target
 echo "${dwh_ears[@]}"
 readonly ear_path="${dwh_ears[0]}"
 echo "$ear_path"
