@@ -541,18 +541,22 @@ mapfile -t dwh_ears < <(
 
 # todo: add multiple targets like docker instances
 # push new ear to target
-echo "${dwh_ears[@]}"
+log_debug "Found following ear files: ${dwh_ears[@]}"
 readonly ear_path="${dwh_ears[0]}"
-echo "$ear_path"
 ear_name="$(basename $ear_path)"
-scp "$ear_path" "$server_user@$dwh_ip:/tmp/$ear_name"
 
 remote_cmd=""
+remote_cmd+="sudo service wildfly stop;"
+remote_cmd+="sudo rm /opt/wildfly/standalone/deployments/dwh*;"
+remote_cmd+="mv /tmp/$ear_name /opt/wildfly/standalone/deployments;"
+remote_cmd+="sudo service wildfly restart;"
 
-if [ -n "$(check_for_conflicting_dwh_files)" ]; then
-  remote_cmd="sudo service wildfly stop; sudo rm /opt/wildfly/standalone/deployments/dwh*;"
-fi
-remote_cmd="$remote_cmd mv /tmp/$ear_name /opt/wildfly/standalone/deployments; sudo service wildfly restart;"
+host="$server_user@$dwh_ip"
+ctl="$HOME/.ssh/cm-%r@%h:%p"
 
-ssh $server_user@$dwh_ip "$remote_cmd"
+
+ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
+scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
+ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
+ssh -O exit -o ControlPath="$ctl" "$host"
 
