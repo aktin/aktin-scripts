@@ -154,6 +154,70 @@ pom_get() {
   printf '%s\n' "$matches"
 }
 
+get_all_poms() {
+  # Find all pom files in whitelisted projects. Ignores target directories
+  local -a poms=()
+
+  log_debug "Collect pom files from whitelisted directories: ${p_whitelist_dirs[*]}"
+  mapfile -t poms < <(
+    for dir in "${p_whitelist_dirs[@]}"; do
+      find "$ROOT_DIR/$dir" -type f -name "pom.xml" \
+        -not -path '*/target/*' 2>/dev/null
+    done
+  )
+
+  log_debug "Found ${#poms[@]} poms"
+  printf '%s\n' "${poms[@]}"
+}
+
+resolve_artifact_to_pom() {
+  # Find a pom file used for building the given artifact. Ignoring artifact version.
+  # Searches only pom files of projects inside whitelist.
+  # Returns empty string if no pom files were found containing the artifact.
+  local reactor="$1"
+  local target_path=""
+  local -a poms
+
+  mapfile -t poms < <(get_all_poms)
+
+  for pom in "${poms[@]}"; do
+    log_debug "pom: $pom"
+    local found="$(xml_reactor_artifactId "$pom")"
+    log_debug "reactor: $found"
+    if [[ "$found" == "$artifact" ]]; then
+      target_path="$pom"
+      break
+    fi
+  done
+  echo "$target_path"
+}
+
+resolve_to_commit() {
+  # Search the commit history of project containing the target pom file,
+  # for the last tagged commit containing the given pom file with target version.
+  # Returns empty string if no match was found.
+  local pom_dir="$1"
+  local version="$2"
+  local commits commit_found=""
+
+  # Find all tagged commits of project containing the target pom
+  local commits=$(git -C "$pom_dir" for-each-ref --sort=-creatordate --format='%(objectname) %(refname:short)' refs/tags)
+
+  local cache_found_versions="" content ver commit tag
+  while read -r commit tag; do
+    content="$(git -C "$pom_dir" show "$commit:$relative_path" 2>/dev/null)"
+    ver="$(xml_reactor_version "$content")"
+    cache_found_versions="$cache_found_versions $ver"
+
+    if [[ "$ver" == "$version" ]]; then
+      log_debug "Module version found in commit '$commit' (tag '$tag')."
+      commit_found="$commit"
+      break
+    fi
+  done <<< "$commits"
+  log_debug "Artifact versions found: '$cache_found_versions'"
+  echo "$commit_found"
+}
 
 
 
@@ -162,30 +226,7 @@ git_resolve_module_to_commit() {
   local artifact="$1"
   local version="$2"
 
-  local target_path=""
-  local -a poms
-
-  # get all poms from all projects
-  mapfile -t poms < <(
-      for dir in "${p_whitelist_dirs[@]}"; do
-          find "$ROOT_DIR/$dir" -type f -name "pom.xml" \
-              -not -path '*/target/*' 2>/dev/null
-      done
-  )
-
-  log_debug "Whitelist: ${p_whitelist_dirs[*]}"
-  log_debug "Found ${#poms[@]} poms"
-
-  # store reactor pom of target artifact, if one is found
-  for pom in "${poms[@]}"; do
-    local found="$(xml_reactor_artifactId "$pom")"
-#    log_debug "$pom"
-    log_debug "reactor: $found"
-    if [[ "$found" == "$artifact" ]]; then
-      target_path="$pom"
-      break
-    fi
-  done
+  local target_path="$(resolve_artifact_to_pom $artifact)"
 
   if [[ -z "$target_path" ]]; then
     log_error "No artifact '$artifact' found inside project pom-files"
@@ -196,30 +237,15 @@ git_resolve_module_to_commit() {
   local target_dir relative_path
   target_dir="$(dirname "$target_path")"
   relative_path="$(git -C "$target_dir" rev-parse --show-prefix)pom.xml"
-  echo "$target_dir $relative_path"
 
   # Search commit containing the requested artifact version
-  local commits commit_found=""
-  local commits=$(git -C "$target_dir" for-each-ref --sort=-creatordate --format='%(objectname) %(refname:short)' refs/tags)
+  local commit="$(resolve_to_commit)"
 
-  local cache_found_versions="" content ver commit tag
-  while read -r commit tag; do
-    content="$(git -C "$target_dir" show "$commit:$relative_path" 2>/dev/null)"
-    ver="$(xml_reactor_version "$content")"
-    cache_found_versions="$cache_found_versions $ver"
-
-    if [[ "$ver" == "$version" ]]; then
-      log_debug "Module version found in commit '$commit' (tag '$tag')."
-      commit_found="$commit"
-      break
-    fi
-  done <<< "$commits"
-
-  if [[ -z "$commit_found" ]]; then
-    log_error "Did not find '$module:$version' in$cache_found_versions"
+  if [[ -z "$commit" ]]; then
+    log_error "Did not find '$module:$version'"
   fi
 
-  printf '%s:%s\n' "$target_path" "$commit_found"
+  printf '%s:%s\n' "$target_path" "$commit"
 }
 
 mvn_clean_install_module() {
