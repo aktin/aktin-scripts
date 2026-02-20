@@ -96,25 +96,13 @@ create_tmp_worktree() {
 }
 
 delete_tmp_worktree() {
+  # save ear created on the worktree
+  local ear=$(find "$tmp_dir" -type f -name "dwh-j2ee-*.ear")
+  cp "$ear" "/tmp/$(basename $ear)"
   # delete temporary worktree and navigate to main working directory
   git worktree remove --force "$tmp_dir"
   cd "$(dirname "$SCRIPT_DIR")"
   rm -rf "$tmp_dir"
-}
-
-backup_worktree_with_stash() {
-  if [ -z "$(git status --porcelain)" ]; then
-    log_info "Worktree clean, no stash created."
-    return 0
-  fi
-
-  log_info "Stashing worktree..."
-  git stash push -u -m "automated worktree backup" >/dev/null \
-    || die "Error while stashing worktree."
-}
-
-git_stash_exists() {
-  git stash list | grep -q .
 }
 
 # get commit id from branch, tag, commit etc.
@@ -239,7 +227,7 @@ git_resolve_module_to_commit() {
   relative_path="$(git -C "$target_dir" rev-parse --show-prefix)pom.xml"
 
   # Search commit containing the requested artifact version
-  local commit="$(resolve_to_commit)"
+  local commit="$(resolve_to_commit $target_dir $version)"
 
   if [[ -z "$commit" ]]; then
     log_error "Did not find '$module:$version'"
@@ -415,6 +403,7 @@ build_from=""
 CONFIG_FILE=""
 rm_packages="false"
 tmp_dir=""
+instance="debian"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -440,6 +429,11 @@ while [[ $# -gt 0 ]]; do
 
     -r|--remove-packages)
       rm_packages="$2"
+      shift 2
+      ;;
+
+    -i|--instance)
+      instance="$2"
       shift 2
       ;;
 
@@ -502,6 +496,8 @@ for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
     break
   fi
 done
+
+ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$INSTANCE")
 readonly -a ORIG_ARGS
 
 # end script if build from artifact is not in project configs
@@ -533,30 +529,82 @@ fi
 build_all_projects
 notify
 echo "copy the .ear file to the dwh"
+
 mapfile -t dwh_ears < <(
-    for dir in "${p_whitelist_dirs[@]}"; do
-        find "$ROOT_DIR/$dir" -type f -name "dwh-j2ee-*.ear" 2>/dev/null
+    for dir in "${p_whitelist_dirs[@]}" "tmp"; do
+        if [[ $dir == "tmp" ]]; then
+          find "/tmp" -type f -name "dwh-j2ee-*.ear" 2>/dev/null
+        else
+          find "$ROOT_DIR/$dir" -type f -name "dwh-j2ee-*.ear" 2>/dev/null
+        fi
     done
 )
 
-# todo: add multiple targets like docker instances
-# push new ear to target
-log_debug "Found following ear files: ${dwh_ears[@]}"
-readonly ear_path="${dwh_ears[0]}"
+readonly ear_path=$(
+  stat -c '%Y %n' "${dwh_ears[@]}" \
+    | sort -nr \
+    | head -n1 \
+    | cut -d' ' -f2-
+)
 ear_name="$(basename $ear_path)"
+log_debug "Newest EAR file: $ear_path}"
 
-remote_cmd=""
-remote_cmd+="sudo service wildfly stop;"
-remote_cmd+="sudo rm /opt/wildfly/standalone/deployments/dwh*;"
-remote_cmd+="mv /tmp/$ear_name /opt/wildfly/standalone/deployments;"
-remote_cmd+="sudo service wildfly restart;"
+# push new ear to target
+debian_deploy() {
+  remote_cmd=""
+  remote_cmd+="sudo service wildfly stop;"
+  remote_cmd+="sudo rm /opt/wildfly/standalone/deployments/dwh*;"
+  remote_cmd+="mv /tmp/$ear_name /opt/wildfly/standalone/deployments;"
+  remote_cmd+="sudo service wildfly restart;"
 
-host="$server_user@$dwh_ip"
-ctl="$HOME/.ssh/cm-%r@%h:%p"
+  host="$server_user@$dwh_ip"
+  ctl="$HOME/.ssh/cm-%r@%h:%p"
 
 
-ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
-scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
-ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
-ssh -O exit -o ControlPath="$ctl" "$host"
+  ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
+  scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
+  ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
+  ssh -O exit -o ControlPath="$ctl" "$host"
+}
+
+
+docker_deploy() {
+  log_debug "Starting Docker Deployment"
+  remote_cmd=""
+  # Undeploy current .ear
+  remote_cmd+="sudo docker exec $WILDFLY bash -lc '
+set -e
+name=\"$ear_name\"
+
+# If the deployment already exists, undeploy it
+if ./bin/jboss-cli.sh --connect --output-json --command=\"/deployment=${ear_name}:read-resource\" >/dev/null 2>&1; then
+  echo \"Undeploying existing ${ear_name}\"
+  ./bin/jboss-cli.sh --connect --command=\"undeploy ${ear_name}\"
+fi
+
+# Clean up filesystem deployment artifacts
+rm -f /opt/wildfly/standalone/deployments/dwh* || true
+' ; "
+
+  # Currently Wildfly seems to automatically deploy the ear when copied to this directory.
+  remote_cmd+="sudo docker cp /tmp/$ear_name $WILDFLY:/opt/wildfly/standalone/deployments/ ; "
+  # todo: add a command to remote_cmd that manually deploys the ear if it is not deployed automatically.
+
+  host="$server_user@$dwh_ip"
+  ctl="$HOME/.ssh/cm-%r@%h:%p"
+
+  # start a new ssh session
+  ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
+  # copy ear to target host
+  scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
+  ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
+  ssh -O exit -o ControlPath="$ctl" "$host"
+}
+
+if [[ "$INSTANCE" == "docker" ]]; then
+  docker_deploy
+elif [[ "$INSTANCE" == "debian" ]]; then
+  debian_deploy
+fi
+
 
