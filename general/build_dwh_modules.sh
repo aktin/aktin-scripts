@@ -248,6 +248,7 @@ install_non_aktin_artifact() {
 
     # todo: add a whitelist/blacklist for these hard-coded modules
     # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
+    log_debug "try non aktin install of '$req_artifact'"
     if { [[ -z "$failed" ]] && [[ "$req_artifact" != "$BASE_GROUP_ID"* ]]; } \
        || [[ "$req_artifact" == *"query-i2b2-sql"* ]] \
        || [[ "$req_artifact" == *"query-aggregate-rscript"* ]] \
@@ -300,6 +301,42 @@ parse_failure_context() {
   _version_ref="${required[-1]}"
 }
 
+attempt_online_artifact_recovery() {
+  # Install missing artifact from Maven repo if artifact is not from aktin.org group or whitelisted.
+  if install_non_aktin_artifact "$@"; then
+    log_debug "Artifact '$req_artifact' was not part of parent group '$BASE_GROUP_ID' or was whitelisted therefore loaded in online Mode."
+    return 0
+  fi
+  return 1
+}
+
+resolve_required_module() {
+  local artifact="$1"
+  local version="$2"
+  local -n _required_pom_dir="$3"
+  local -n _required_commit_id="$4"
+  req_full="$(git_resolve_module_to_commit "$artifact" "$version")"
+  req="${req_full##*$'\n'}"
+  IFS=':' read -r _required_pom_dir _required_commit_id <<<"$req"
+}
+
+attempt_local_artifact_recovery() {
+  local req_artifact="$1"
+  local req_version="$2"
+  local req_full req required_pom_dir required_commit_id project_name
+  resolve_required_module "$req_artifact" "$req_version" required_pom_dir required_commit_id
+
+  project_name="$(basename "$(git -C "$(dirname "$required_pom_dir")" rev-parse --show-toplevel)")"
+  log_error "Another module is required; add: \"$project_name\" \"<sdk>\" \"\" \"$required_commit_id\" to config and re-run"
+  add_new_project_conf "$project_name" "$required_commit_id"
+  close_tmp_worktree
+  exec env -i \
+    PATH="$BASE_PATH" \
+    HOME="${HOME:-/home/$USER}" \
+    USER="${USER:-}" \
+    "$SCRIPT_PATH" "${ORIG_ARGS[@]}"
+}
+
 mvn_clean_install_module() {
   local sdk_dir="$1"
   local out="" rc=0
@@ -320,26 +357,9 @@ mvn_clean_install_module() {
   parse_failure_context "$out" failed req_group req_artifact req_version
   log_debug "failed=$failed, artifact=$req_group:$req_artifact:$req_version"
 
-  # Install missing artifact from Maven repo if artifact is not from aktin.org group or whitelisted.
-  if install_non_aktin_artifact "$req_group" "$req_artifact" "$req_version" "$failed" "$sdk_dir"; then
-    log_debug "Artifact '$req_artifact' was not part of parent group '$BASE_GROUP_ID' or was whitelisted therefore loaded in online Mode."
-    return 0
+  if ! attempt_online_artifact_recovery "$req_group" "$req_artifact" "$req_version" "$failed" "$sdk_dir"; then
+    attempt_local_artifact_recovery "$req_artifact" "$req_version"
   fi
-
-  local req_full req required_pom_dir required_commit_id project_name
-  req_full="$(git_resolve_module_to_commit "$req_artifact" "$req_version")"
-  req="${req_full##*$'\n'}"
-  IFS=':' read -r required_pom_dir required_commit_id <<<"$req"
-
-  project_name="$(basename "$(git -C "$(dirname "$required_pom_dir")" rev-parse --show-toplevel)")"
-  log_error "Another module is required; add: \"$project_name\" \"<sdk>\" \"\" \"$required_commit_id\" to config and re-run"
-  add_new_project_conf "$project_name" "$required_commit_id"
-  close_tmp_worktree
-  exec env -i \
-    PATH="$BASE_PATH" \
-    HOME="${HOME:-/home/$USER}" \
-    USER="${USER:-}" \
-    "$SCRIPT_PATH" "${ORIG_ARGS[@]}"
 }
 
 build_all_projects() {
