@@ -19,9 +19,6 @@ if [ "$EUID" = 0 ]; then
   exit 1
 fi
 
-# SET you Java paths here
-SDK8="$HOME/.jdks/corretto-1.8.0_432"
-SDK11="$HOME/.jdks/corretto-11.0.25/"
 
 BASE_GROUP_ID="org.aktin"
 
@@ -96,7 +93,7 @@ readonly SCRIPT_PATH
 
 # check and init script parameters
 # set project to start building from if not all should be build
-dwh_ip=""
+server_ip=""
 build_from=""
 CONFIG_FILE=""
 rm_packages="false"
@@ -113,7 +110,7 @@ while [[ $# -gt 0 ]]; do
        exit 0
        ;;
     -p|--server-ip)
-      dwh_ip="$2"
+      server_ip="$2"
       shift 2
       ;;
 
@@ -164,7 +161,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$dwh_ip" ]]; then
+if [[ -z "$server_ip" ]]; then
   echo "Missing required parameter: --server-ip" >&2
   exit 1
 fi
@@ -237,7 +234,7 @@ if [[ -z "$build_from" ]]; then
   build_from=${projects[0]}   # root project default
 fi
 
-readonly dwh_ip
+readonly server_ip
 readonly build_from
 readonly ROOT_DIR
 readonly server_user=root
@@ -246,7 +243,6 @@ readonly SCRIPT_DIR="$(realpath "${BASH_SOURCE[0]}")"
 #----------------------------------
 # START - General helper functions
 #----------------------------------
-
 log_debug() { echo "[DEBUG] $*" >&2; }
 log_info()  { echo "[INFO]  $*" >&2; }
 log_warn()  { echo "[WARN]  $*" >&2; }
@@ -652,7 +648,7 @@ notify() {
 }
 
 check_for_conflicting_dwh_files() {
-  ssh "$server_user@$dwh_ip" 'find /opt/wildfly/standalone/deployments -type f -name "dwh*.ear"'
+  ssh "$server_user@$server_ip" 'find /opt/wildfly/standalone/deployments -type f -name "dwh*.ear"'
 }
 
 #----------------------------------
@@ -710,7 +706,7 @@ debian_deploy() {
   remote_cmd+="mv /tmp/$ear_name /opt/wildfly/standalone/deployments;"
   remote_cmd+="sudo service wildfly restart;"
 
-  host="$server_user@$dwh_ip"
+  host="$server_user@$server_ip"
   ctl="$HOME/.ssh/cm-%r@%h:%p"
 
 
@@ -743,7 +739,7 @@ rm -f /opt/wildfly/standalone/deployments/dwh* || true
   remote_cmd+="sudo docker cp /tmp/$ear_name $wildfly_container:/opt/wildfly/standalone/deployments/ ; "
   # todo: add a command to remote_cmd that manually deploys the ear if it is not deployed automatically.
 
-  host="$server_user@$dwh_ip"
+  host="$server_user@$server_ip"
   ctl="$HOME/.ssh/cm-%r@%h:%p"
 
   # start a new ssh session
