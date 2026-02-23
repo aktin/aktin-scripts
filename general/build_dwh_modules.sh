@@ -25,9 +25,194 @@ SDK11="$HOME/.jdks/corretto-11.0.25/"
 
 BASE_GROUP_ID="org.aktin"
 
+
+
+#----------------------------------
+# START - Read Script parameters
+#----------------------------------
+ORIG_ARGS=("$@")
+
+: "${BASE_PATH:=$PATH}"
+export BASE_PATH
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+readonly SCRIPT_PATH
+
+
+# check and init script parameters
+# set project to start building from if not all should be build
+dwh_ip=""
+build_from=""
+CONFIG_FILE=""
+rm_packages="false"
+tmp_dir=""
+instance="debian"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+       print_help
+       exit 0
+       ;;
+    -p|--server-ip)
+      dwh_ip="$2"
+      shift 2
+      ;;
+
+    -b|--build-from)
+      build_from="$2"
+      shift 2
+      ;;
+
+    -d|--project-dir)
+      ROOT_DIR="$2"
+      shift 2
+      ;;
+
+    -c|--conf)
+      CONFIG_FILE="$2"
+      shift 2
+      ;;
+
+    -r|--remove-packages)
+      rm_packages="$2"
+      shift 2
+      ;;
+
+    -i|--instance)
+      instance="$2"
+      shift 2
+      ;;
+
+    *)
+      echo "Unknown parameter: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$dwh_ip" ]]; then
+  echo "Missing required parameter: --server-ip" >&2
+  exit 1
+fi
+
+if [[ -z "$ROOT_DIR" ]]; then
+  ROOT_DIR="$PWD"
+fi
+
+readonly rm_packages
+if [[ "$rm_packages" == "true" ]]; then
+  echo "[WARN] Removing all packages from local Maven installations"
+  if [[ -d "$HOME/.m2/repository/org/aktin" ]]; then
+    rm -rf ~/.m2/repository/org/aktin
+    echo "[INFO] Removed artifacts from local maven store"
+  else
+    echo "[INFO] No Local maven store found, skipping."
+  fi
+fi
+
+if [[ -z "$CONFIG_FILE" ]]; then
+  CONFIG_FILE="$PWD/projects.conf"
+fi
+if [[ "$(basename $CONFIG_FILE)" != "script-config.conf" ]];then
+  cp "$CONFIG_FILE" "$(dirname $CONFIG_FILE)/script-config.conf"
+  CONFIG_FILE="$(dirname $CONFIG_FILE)/script-config.conf"
+fi
+
+readonly CONFIG_FILE
+
+source "$CONFIG_FILE"
+
+echo "$instance"
+
+p_array_width=4
+if [[ "${#projects[@]}" -gt 100 ]]; then
+  read -p "Warning. Current config size: "$(expr ${#projects[@]} / "$p_array_width")" (Press any key to continue, ctrl+c to stop)"
+fi
+
+# if a config exists, remove it from orig_args
+for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
+  if [[ "${ORIG_ARGS[i]}" == "-c" ]] || [[ "${ORIG_ARGS[i]}" == "--config" ]]; then
+    ORIG_ARGS=("${ORIG_ARGS[@]:0:i}" "${ORIG_ARGS[@]:i+2}")
+    break
+  fi
+done
+ORIG_ARGS=("${ORIG_ARGS[@]}" "-c" "$CONFIG_FILE")
+
+# remove 'remove-package' tag, to make further executions run faster
+for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
+  if [[ "${ORIG_ARGS[i]}" == "-r" ]] || [[ "${ORIG_ARGS[i]}" == "--remove-packages" ]]; then
+    ORIG_ARGS=("${ORIG_ARGS[@]:0:i}" "${ORIG_ARGS[@]:i+2}")
+    break
+  fi
+done
+
+ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$instance")
+readonly -a ORIG_ARGS
+
+# end script if build from artifact is not in project configs
+[[ -n "$build_from" ]] && ! project_exists "$build_from" && die "Given Project '$build_from' not found in config."
+if [[ -z "$build_from" ]]; then
+  build_from=${projects[0]}   # root project default
+fi
+
+readonly dwh_ip
+readonly build_from
+readonly ROOT_DIR
+readonly server_user=root
+readonly SCRIPT_DIR="$(realpath "${BASH_SOURCE[0]}")"
+
 #----------------------------------
 # START - General helper functions
 #----------------------------------
+print_help() {
+  local script
+  script="$(basename "${BASH_SOURCE[0]}")"
+
+  # Use a heredoc and substitute only SCRIPT_NAME
+  cat <<EOF
+Usage:
+  ${script} --server-ip <IP> [options]
+
+Description:
+  Builds and installs configured Maven modules (offline by default) and can optionally
+  clean local Maven artifacts before building. Uses a config file (projects.conf by default)
+  that is copied to script-config.conf for stable re-runs.
+
+Required:
+  -p, --server-ip <IP>         Target server IP / host used by later deployment steps.
+
+Options:
+  -b, --build-from <NAME>      Start building from the given project name (skip earlier entries).
+                               Default: build all configured projects.
+
+  -d, --project-dir <DIR>      Root directory that contains the project folders.
+                               Default: current working directory.
+
+  -c, --conf <FILE>            Path to config file to load projects array from.
+                               Default: ./projects.conf (will be copied to ./script-config.conf)
+
+  -r, --remove-packages <bool> Remove local Maven artifacts under ~/.m2/repository/org/aktin
+                               before building. Use "true" to enable.
+                               Default: false
+
+  -i, --instance <NAME>        Instance/environment selector.
+                               Default: debian
+
+  -h, --help                   Show this help and exit.
+
+Examples:
+  ${script} --server-ip 10.0.0.12
+  ${script} -p 10.0.0.12 -d /home/wiliam/IdeaProjects -c ./projects.conf
+  ${script} -p dwh.example.org --remove-packages true
+  ${script} -p 10.0.0.12 --build-from dwh-j2ee --instance debian
+
+Exit codes:
+  0  Success
+  1  Invalid arguments / missing required parameters
+EOF
+}
+
 log_debug() { echo "[DEBUG] $*" >&2; }
 log_info()  { echo "[INFO]  $*" >&2; }
 log_warn()  { echo "[WARN]  $*" >&2; }
@@ -444,133 +629,7 @@ check_for_conflicting_dwh_files() {
 #----------------------------------
 # START - Script Execution Workflow
 #----------------------------------
-ORIG_ARGS=("$@")
 
-: "${BASE_PATH:=$PATH}"
-export BASE_PATH
-
-SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
-readonly SCRIPT_PATH
-
-
-# check and init script parameters
-# set project to start building from if not all should be build
-dwh_ip=""
-build_from=""
-CONFIG_FILE=""
-rm_packages="false"
-tmp_dir=""
-instance="debian"
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -p|--server-ip)
-      dwh_ip="$2"
-      shift 2
-      ;;
-
-    -b|--build-from)
-      build_from="$2"
-      shift 2
-      ;;
-
-    -d|--project-dir)
-      ROOT_DIR="$2"
-      shift 2
-      ;;
-
-    -c|--conf)
-      CONFIG_FILE="$2"
-      shift 2
-      ;;
-
-    -r|--remove-packages)
-      rm_packages="$2"
-      shift 2
-      ;;
-
-    -i|--instance)
-      instance="$2"
-      shift 2
-      ;;
-
-    *)
-      echo "Unknown parameter: $1" >&2
-      exit 1
-      ;;
-  esac
-done
-
-if [[ -z "$dwh_ip" ]]; then
-  echo "Missing required parameter: --server-ip" >&2
-  exit 1
-fi
-
-if [[ -z "$ROOT_DIR" ]]; then
-  ROOT_DIR="$PWD"
-fi
-
-readonly rm_packages
-if [[ "$rm_packages" == "true" ]]; then
-  echo "[WARN] Removing all packages from local Maven installations"
-  if [[ -d "$HOME/.m2/repository/org/aktin" ]]; then
-    rm -rf ~/.m2/repository/org/aktin
-    echo "[INFO] Removed artifacts from local maven store"
-  else
-    echo "[INFO] No Local maven store found, skipping."
-  fi
-fi
-
-if [[ -z "$CONFIG_FILE" ]]; then
-  CONFIG_FILE="$PWD/projects.conf"
-fi
-if [[ "$(basename $CONFIG_FILE)" != "script-config.conf" ]];then
-  cp "$CONFIG_FILE" "$(dirname $CONFIG_FILE)/script-config.conf"
-  CONFIG_FILE="$(dirname $CONFIG_FILE)/script-config.conf"
-fi
-
-readonly CONFIG_FILE
-
-source "$CONFIG_FILE"
-
-echo "$instance"
-
-p_array_width=4
-if [[ "${#projects[@]}" -gt 100 ]]; then
-  read -p "Warning. Current config size: "$(expr ${#projects[@]} / "$p_array_width")" (Press any key to continue, ctrl+c to stop)"
-fi
-
-# if a config exists, remove it from orig_args
-for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
-  if [[ "${ORIG_ARGS[i]}" == "-c" ]] || [[ "${ORIG_ARGS[i]}" == "--config" ]]; then
-    ORIG_ARGS=("${ORIG_ARGS[@]:0:i}" "${ORIG_ARGS[@]:i+2}")
-    break
-  fi
-done
-ORIG_ARGS=("${ORIG_ARGS[@]}" "-c" "$CONFIG_FILE")
-
-# remove 'remove-package' tag, to make further executions run faster
-for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
-  if [[ "${ORIG_ARGS[i]}" == "-r" ]] || [[ "${ORIG_ARGS[i]}" == "--remove-packages" ]]; then
-    ORIG_ARGS=("${ORIG_ARGS[@]:0:i}" "${ORIG_ARGS[@]:i+2}")
-    break
-  fi
-done
-
-ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$instance")
-readonly -a ORIG_ARGS
-
-# end script if build from artifact is not in project configs
-[[ -n "$build_from" ]] && ! project_exists "$build_from" && die "Given Project '$build_from' not found in config."
-if [[ -z "$build_from" ]]; then
-  build_from=${projects[0]}   # root project default
-fi
-
-readonly dwh_ip
-readonly build_from
-readonly ROOT_DIR
-readonly server_user=root
-readonly SCRIPT_DIR="$(realpath "${BASH_SOURCE[0]}")"
 
 generate_project_whitelist
 echo "System Java version: $(which java)"
