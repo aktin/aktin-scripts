@@ -58,8 +58,8 @@ project_exists() {
   return 1
 }
 
-add_alt_conf_commit(){
-  # duplicate target projects config and alter it's commit id
+add_new_project_conf(){
+  # Adds a new config for $projects. Inserts the config after existing entry of the same project to keep build order intact.
   local project="$1"
   local commit="$2"
 
@@ -88,17 +88,18 @@ generate_project_whitelist() {
   done
 }
 
-create_tmp_worktree() {
+open_tmp_worktree() {
   local target_commit="$1"
   [[ -d "$tmp_dir" ]] && die "A temporary workingtree already exists."
   tmp_dir="$(mktemp -d -t build-wt-XXXXXXXX)"
   git worktree add --detach "$tmp_dir" "$target_commit"
+  cd "$tmp_dir" # move to temporary worktree
 }
 
-delete_tmp_worktree() {
-  # save ear created on the worktree
+close_tmp_worktree() {
   local ear=$(find "$tmp_dir" -type f -name "dwh-j2ee-*.ear")
-  cp "$ear" "/tmp/$(basename $ear)"
+  [[ -n "$ear" ]] && cp "$ear" "/tmp/$(basename $ear)"  # save ear file from worktree
+
   # delete temporary worktree and navigate to main working directory
   git worktree remove --force "$tmp_dir"
   cd "$(dirname "$SCRIPT_DIR")"
@@ -236,69 +237,104 @@ git_resolve_module_to_commit() {
   printf '%s:%s\n' "$target_path" "$commit"
 }
 
-mvn_clean_install_module() {
-  local sdk_dir="$1"
-  local out="" rc=0
+install_non_aktin_artifact() {
+  # Install Maven artifact from online repository, if required module
+  # has different group id than $BASE_GROUP_ID or is whitelisted.
+    local req_group="$1"
+    local req_artifact="$2"
+    local req_version="$3"
+    local failed="$4"
+    local sdk_dir="$5"
 
-  log_info "Building module using $sdk_dir"
+    # todo: add a whitelist/blacklist for these hard-coded modules
+    # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
+    if { [[ -z "$failed" ]] && [[ "$req_artifact" != "$BASE_GROUP_ID"* ]]; } \
+       || [[ "$req_artifact" == *"query-i2b2-sql"* ]] \
+       || [[ "$req_artifact" == *"query-aggregate-rscript"* ]] \
+       || [[ "$req_artifact" == *"query-model"* ]]; then
 
-  export JAVA_HOME="$sdk_dir"
+      log_debug "Missing artifact not in config projects; trying dependency:get for '${req_group}:${req_artifact}:${req_version}'"
+
+      set +e
+      mvn dependency:get \
+        -DgroupId="$req_group" \
+        -DartifactId="$req_artifact" \
+        -Dversion="$req_version"
+      local rc=$?
+      set -e
+
+      if (( rc != 0 )); then
+        return 1
+      fi
+
+      mvn_clean_install_module "$sdk_dir" || return 1
+      return 0
+    fi
+
+    return 1
+}
+
+set_java_path() {
+  export JAVA_HOME="$1"
   export PATH="$JAVA_HOME/bin:$PATH"
   log_debug "JAVA_HOME set to: $JAVA_HOME"
+}
 
-  cd "$tmp_dir" # move to temporary worktree
-  set +e
-  out="$(mvn -o -B -Dstyle.color=always clean install -DskipTests 2>&1)"
-  rc=$?
-  set -e
+parse_failure_context() {
+  local out="$1"
+  local -n _failed_ref="$2"
+  local -n _group_ref="$3"
+  local -n _artifact_ref="$4"
+  local -n _version_ref="$5"
 
-  if [[ $rc -eq 0 ]]; then
-    return 0
-  fi
+  local required_str
 
-  log_error "Build failed"
-
-  local failed required_str
-  failed="$(grep -oP 'project \K[^ ]+' <<<"$out" | tail -n 1 || true)"
+  _failed_ref="$(grep -oP 'project \K[^ ]+' <<<"$out" | tail -n 1 || true)"
   required_str="$(grep -oPm1 'artifact \K[^ ]+' <<<"$out" || true)"
-
-  log_debug "Module that failed: '$failed', requires: '$required_str'"
 
   local -a required=()
   IFS=':' read -r -a required <<<"$required_str"
 
-  # if dependency is not a org.aktin dependency ($failed is empty), permit online mode and loading from maven store
-  # todo: add a whitelist/blacklist for these hard-coded modules
-  # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
-  if { [[ -z "$failed" ]] && [[ "${required[1]}" != "$BASE_GROUP_ID"* ]]; } \
-     || [[ "${required[1]}" == *"query-i2b2-sql"* ]] \
-     || [[ "${required[1]}" == *"query-aggregate-rscript"* ]] \
-     || [[ "${required[1]}" == *"query-model"* ]]; then
+  _group_ref="${required[0]}"
+  _artifact_ref="${required[1]}"
+  _version_ref="${required[-1]}"
+}
 
+mvn_clean_install_module() {
+  local sdk_dir="$1"
+  local out="" rc=0
 
-    log_debug "Missing artifact not in config projects; trying dependency:get for '${required[0]}:${required[1]}:${required[-1]}'"
+  # Try maven offline install
+  log_info "Building module using $sdk_dir"
+  set_java_path "$sdk_dir"
+  set +e
+  out="$(mvn -o -B -Dstyle.color=always clean install -DskipTests 2>&1)"
+  rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    return 0  # Maven build successful
+  fi
 
-    set +e
-    mvn dependency:get \
-      -DgroupId="${required[0]}" \
-      -DartifactId="${required[1]}" \
-      -Dversion="${required[-1]}"
-    set -e
+  log_error "Build failed"
+  local failed req_group req_artifact req_version
+  parse_failure_context "$out" failed req_group req_artifact req_version
+  log_debug "failed=$failed, artifact=$req_group:$req_artifact:$req_version"
 
-    mvn_clean_install_module "$sdk_dir"
+  # Install missing artifact from Maven repo if artifact is not from aktin.org group or whitelisted.
+  if install_non_aktin_artifact "$req_group" "$req_artifact" "$req_version" "$failed" "$sdk_dir"; then
+    log_debug "Artifact '$req_artifact' was not part of parent group '$BASE_GROUP_ID' or was whitelisted therefore loaded in online Mode."
     return 0
   fi
 
   local req_full req required_pom_dir required_commit_id project_name
-  req_full="$(git_resolve_module_to_commit "${required[1]}" "${required[-1]}")"
+  req_full="$(git_resolve_module_to_commit "$req_artifact" "$req_version")"
   req="${req_full##*$'\n'}"
   IFS=':' read -r required_pom_dir required_commit_id <<<"$req"
 
   project_name="$(basename "$(git -C "$(dirname "$required_pom_dir")" rev-parse --show-toplevel)")"
   log_error "Another module is required; add: \"$project_name\" \"<sdk>\" \"\" \"$required_commit_id\" to config and re-run"
-  add_alt_conf_commit "$project_name" "$required_commit_id"
-
-  delete_tmp_worktree
+  add_new_project_conf "$project_name" "$required_commit_id"
+  close_tmp_worktree
   exec env -i \
     PATH="$BASE_PATH" \
     HOME="${HOME:-/home/$USER}" \
@@ -345,12 +381,13 @@ build_all_projects() {
     # if current HEAD is target, local untracked changes will be built too
     if [[ "$(git rev-parse HEAD)" == "$target_commit" ]]; then
       log_debug "Already on target HEAD for '$project_name'"
+      mvn_clean_install_module "$sdk_dir"
     else
       log_debug "Switching '$project_name' to target commit '$target_commit'"
+      open_tmp_worktree "$target_commit"
+      mvn_clean_install_module "$sdk_dir"
+      close_tmp_worktree
     fi
-    create_tmp_worktree "$target_commit"
-    mvn_clean_install_module "$sdk_dir"
-    delete_tmp_worktree
   done
 }
 
@@ -475,6 +512,9 @@ fi
 readonly CONFIG_FILE
 
 source "$CONFIG_FILE"
+
+echo "$instance"
+
 p_array_width=4
 if [[ "${#projects[@]}" -gt 100 ]]; then
   read -p "Warning. Current config size: "$(expr ${#projects[@]} / "$p_array_width")" (Press any key to continue, ctrl+c to stop)"
@@ -497,7 +537,7 @@ for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
   fi
 done
 
-ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$INSTANCE")
+ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$instance")
 readonly -a ORIG_ARGS
 
 # end script if build from artifact is not in project configs
@@ -547,7 +587,7 @@ readonly ear_path=$(
     | cut -d' ' -f2-
 )
 ear_name="$(basename $ear_path)"
-log_debug "Newest EAR file: $ear_path}"
+log_debug "Newest EAR file: $ear_path"
 
 # push new ear to target
 debian_deploy() {
@@ -572,7 +612,7 @@ docker_deploy() {
   log_debug "Starting Docker Deployment"
   remote_cmd=""
   # Undeploy current .ear
-  remote_cmd+="sudo docker exec $WILDFLY bash -lc '
+  remote_cmd+="sudo docker exec $wildfly bash -lc '
 set -e
 name=\"$ear_name\"
 
@@ -587,7 +627,7 @@ rm -f /opt/wildfly/standalone/deployments/dwh* || true
 ' ; "
 
   # Currently Wildfly seems to automatically deploy the ear when copied to this directory.
-  remote_cmd+="sudo docker cp /tmp/$ear_name $WILDFLY:/opt/wildfly/standalone/deployments/ ; "
+  remote_cmd+="sudo docker cp /tmp/$ear_name $wildfly:/opt/wildfly/standalone/deployments/ ; "
   # todo: add a command to remote_cmd that manually deploys the ear if it is not deployed automatically.
 
   host="$server_user@$dwh_ip"
@@ -601,9 +641,9 @@ rm -f /opt/wildfly/standalone/deployments/dwh* || true
   ssh -O exit -o ControlPath="$ctl" "$host"
 }
 
-if [[ "$INSTANCE" == "docker" ]]; then
+if [[ "$instance" == "docker" ]]; then
   docker_deploy
-elif [[ "$INSTANCE" == "debian" ]]; then
+elif [[ "$instance" == "debian" ]]; then
   debian_deploy
 fi
 
