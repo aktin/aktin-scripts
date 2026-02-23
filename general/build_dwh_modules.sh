@@ -26,6 +26,61 @@ SDK11="$HOME/.jdks/corretto-11.0.25/"
 BASE_GROUP_ID="org.aktin"
 
 
+print_help() {
+  local script
+  script="$(basename "${BASH_SOURCE[0]}")"
+
+  # Use a heredoc and substitute only SCRIPT_NAME
+  cat <<EOF
+Usage:
+  ${script} --server-ip <IP> [options]
+
+Recommended Uses:
+  # Minimal
+  ${script} -p <IP> -d
+
+Description:
+  Builds and installs configured Maven modules (offline by default) and can optionally
+  clean local Maven artifacts before building. Uses a config file (projects.conf by default)
+  that is copied to script-config.conf for stable re-runs.
+
+Required:
+  -p, --server-ip <IP>         Target server IP / host used by later deployment steps.
+  --set-java-8                 Path to installed Java SDK 8
+  --set-java-11                Path to installed Java SDK 11
+
+Options:
+  -b, --build-from <NAME>      Start building from the given project name (skip earlier entries).
+                               Default: build all configured projects.
+
+  -d, --project-dir <DIR>      Root directory that contains the project folders.
+                               Default: current working directory.
+
+  -c, --conf <FILE>            Path to config file to load projects array from.
+                               Default: ./projects.conf (will be copied to ./script-config.conf)
+
+  -r, --remove-packages        Remove local Maven artifacts under ~/.m2/repository/org/aktin
+                               before building.
+                               Default: false
+
+  -i, --instance <NAME>        Instance/environment selector.
+                               Default: debian, Options: debian, docker
+
+  -w, --wildfly <NAME>         Name of Wildfly container. Required if instance is set to "docker".
+
+  -h, --help                   Show this help and exit.
+
+Examples:
+  ${script} -p 10.0.0.12
+  ${script} -p 10.0.0.12 -d /home/user/IdeaProjects -c ./projects.conf
+  ${script} -p dwh.example.org --remove-packages
+  ${script} -p 10.0.0.12 --build-from dwh-j2ee --instance debian
+
+Exit codes:
+  0  Success
+  1  Invalid arguments / missing required parameters
+EOF
+}
 
 #----------------------------------
 # START - Read Script parameters
@@ -47,6 +102,9 @@ CONFIG_FILE=""
 rm_packages="false"
 tmp_dir=""
 instance="debian"
+SDK8=""
+SDK11=""
+$wildfly_container=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,12 +133,27 @@ while [[ $# -gt 0 ]]; do
       ;;
 
     -r|--remove-packages)
-      rm_packages="$2"
-      shift 2
+      rm_packages="true"
+      shift 1
       ;;
 
     -i|--instance)
       instance="$2"
+      shift 2
+      ;;
+
+    -w|--wildfly)
+      wildfly_container="$2"
+      shift 2
+      ;;
+
+    --set-java-8)
+      SDK8="$2"
+      shift 2
+      ;;
+
+    --set-java-11)
+      SDK11="$2"
       shift 2
       ;;
 
@@ -99,6 +172,14 @@ fi
 if [[ -z "$ROOT_DIR" ]]; then
   ROOT_DIR="$PWD"
 fi
+
+if [[ "$instance" == "docker" ]] && [[ -z "$wildfly" ]]; then
+  log_error "docker instance requires wildfly container. Add using \"-w\" or \"--wildfly\""
+  exit 1
+fi
+
+[[ -z "$SDK8" ]] && log_error "SDK-8 path not set"
+[[ -z "$SDK11" ]] && log_error "SDK-11 path not set"
 
 readonly rm_packages
 if [[ "$rm_packages" == "true" ]]; then
@@ -165,53 +246,6 @@ readonly SCRIPT_DIR="$(realpath "${BASH_SOURCE[0]}")"
 #----------------------------------
 # START - General helper functions
 #----------------------------------
-print_help() {
-  local script
-  script="$(basename "${BASH_SOURCE[0]}")"
-
-  # Use a heredoc and substitute only SCRIPT_NAME
-  cat <<EOF
-Usage:
-  ${script} --server-ip <IP> [options]
-
-Description:
-  Builds and installs configured Maven modules (offline by default) and can optionally
-  clean local Maven artifacts before building. Uses a config file (projects.conf by default)
-  that is copied to script-config.conf for stable re-runs.
-
-Required:
-  -p, --server-ip <IP>         Target server IP / host used by later deployment steps.
-
-Options:
-  -b, --build-from <NAME>      Start building from the given project name (skip earlier entries).
-                               Default: build all configured projects.
-
-  -d, --project-dir <DIR>      Root directory that contains the project folders.
-                               Default: current working directory.
-
-  -c, --conf <FILE>            Path to config file to load projects array from.
-                               Default: ./projects.conf (will be copied to ./script-config.conf)
-
-  -r, --remove-packages <bool> Remove local Maven artifacts under ~/.m2/repository/org/aktin
-                               before building. Use "true" to enable.
-                               Default: false
-
-  -i, --instance <NAME>        Instance/environment selector.
-                               Default: debian
-
-  -h, --help                   Show this help and exit.
-
-Examples:
-  ${script} --server-ip 10.0.0.12
-  ${script} -p 10.0.0.12 -d /home/wiliam/IdeaProjects -c ./projects.conf
-  ${script} -p dwh.example.org --remove-packages true
-  ${script} -p 10.0.0.12 --build-from dwh-j2ee --instance debian
-
-Exit codes:
-  0  Success
-  1  Invalid arguments / missing required parameters
-EOF
-}
 
 log_debug() { echo "[DEBUG] $*" >&2; }
 log_info()  { echo "[INFO]  $*" >&2; }
@@ -691,7 +725,7 @@ docker_deploy() {
   log_debug "Starting Docker Deployment"
   remote_cmd=""
   # Undeploy current .ear
-  remote_cmd+="sudo docker exec $wildfly bash -lc '
+  remote_cmd+="sudo docker exec $wildfly_container bash -lc '
 set -e
 name=\"$ear_name\"
 
@@ -706,7 +740,7 @@ rm -f /opt/wildfly/standalone/deployments/dwh* || true
 ' ; "
 
   # Currently Wildfly seems to automatically deploy the ear when copied to this directory.
-  remote_cmd+="sudo docker cp /tmp/$ear_name $wildfly:/opt/wildfly/standalone/deployments/ ; "
+  remote_cmd+="sudo docker cp /tmp/$ear_name $wildfly_container:/opt/wildfly/standalone/deployments/ ; "
   # todo: add a command to remote_cmd that manually deploys the ear if it is not deployed automatically.
 
   host="$server_user@$dwh_ip"
