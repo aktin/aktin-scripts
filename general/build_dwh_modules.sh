@@ -7,7 +7,7 @@
 # Purpose:      Build DWH Maven modules, manages maven artifact versioning, creates and relocates EAR to target,
 #               manages EAR integration on target.
 # Usages:       ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects>
-#               ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects> -r true
+#               ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects> -r
 #               ./build_dwh_modules.sh -p <target_ip> -d <parent_dir_of_projects> -b <project_name>
 #--------------------------------------
 
@@ -15,7 +15,7 @@ set -euo pipefail
 
 # check: running as root
 if [ "$EUID" = 0 ]; then
-  echo "Pleas do not run as root"
+  echo "Please do not run as root"
   exit 1
 fi
 
@@ -53,7 +53,7 @@ Options:
   -d, --project-dir <DIR>      Root directory that contains the project folders.
                                Default: current working directory.
 
-  -c, --conf <FILE>            Path to config file to load projects array from.
+  -c, --config <FILE>            Path to config file to load projects array from.
                                Default: ./projects.conf (will be copied to ./script-config.conf)
 
   -r, --remove-packages        Remove local Maven artifacts under ~/.m2/repository/org/aktin
@@ -83,6 +83,31 @@ log_debug() { echo "[DEBUG] $*" >&2; }
 log_info()  { echo "[INFO]  $*" >&2; }
 log_warn()  { echo "[WARN]  $*" >&2; }
 log_error() { echo "[ERROR] $*" >&2; }
+
+die() {
+  local message="$1"
+  local code="${2:-1}"; shift || true
+  log_error "$message" "Exiting with error code: $code"
+  exit "$code"
+}
+
+# does given project name exist in project list
+project_exists() {
+  local project="$1"
+  local project_name=""
+
+  log_debug "Checking if project exists in config: $project"
+
+  for ((i=0; i<"${#projects[@]}"; i+="$projects_entry_width")); do
+    project_name="${projects[i]}"
+    if [[ "$project_name" == "$project" ]]; then
+      printf '%s\n' "$project"
+      return 0
+    fi
+  done
+
+  return 1
+}
 
 #----------------------------------
 # START - Read Script parameters
@@ -129,7 +154,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
 
-    -c|--conf)
+    -c|--config)
       CONFIG_FILE="$2"
       shift 2
       ;;
@@ -180,8 +205,8 @@ if [[ "$instance" == "docker" ]] && [[ -z "$wildfly_container" ]]; then
   exit 1
 fi
 
-[[ -z "$SDK8" ]] && log_error "SDK-8 path not set"
-[[ -z "$SDK11" ]] && log_error "SDK-11 path not set"
+[[ -z "$SDK8" ]]  && die "SDK-8 path not set"
+[[ -z "$SDK11" ]] && die "SDK-11 path not set"
 
 readonly rm_packages
 if [[ "$rm_packages" == "true" ]]; then
@@ -208,7 +233,7 @@ readonly CONFIG_FILE
 
 source "$CONFIG_FILE" # Load project confs from .conf file
 if [[ "${#projects[@]}" -gt 100 ]]; then
-  read -p "Warning. Current config size: "$(expr ${#projects[@]} / "$projects_entry_width")" (Press any key to continue, ctrl+c to stop)"
+  read -p "Warning. Current config size: '$(expr ${#projects[@]} / "$projects_entry_width")' (Press any key to continue, ctrl+c to stop)"
 fi
 
 # if a config exists, remove it from orig_args, to make it possible to insert internal script-config as parameter
@@ -228,7 +253,7 @@ for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
   fi
 done
 
-ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$instance")
+#ORIG_ARGS=("${ORIG_ARGS[@]}" "--instance" "$instance")
 readonly -a ORIG_ARGS
 
 # end script if build from artifact is not in project configs
@@ -241,42 +266,16 @@ readonly server_ip
 readonly build_from
 readonly ROOT_DIR
 readonly server_user=root
-readonly SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 
 #----------------------------------
 # START - General helper functions
 #----------------------------------
-die() {
-  local message="$1"
-  local code="${2:-1}"; shift || true
-  log_error "$message" "Exiting with error code: $code"
-  exit "$code"
-}
-
-# does given project name exist in project list
-project_exists() {
-  local project="$1"
-  local project_name=""
-
-  log_debug "Checking if project exists in config: $project"
-
-  for ((i=0; i<"${#projects[@]}"; i+="$projects_entry_width")); do
-    project_name="${projects[i]}"
-    if [[ "$project_name" == "$project" ]]; then
-      printf '%s\n' "$project"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
 add_new_project_conf(){
   # Adds a new config for $projects. Inserts the config after existing entry of the same project to keep build order intact.
   local project="$1"
   local commit="$2"
 
-  [[ -n "$commit" ]] || die "[ERROR] Commit ID was empty, but is required. $commit"
+  [[ -n "$commit" ]] || die "Commit ID was empty, but is required. $commit"
 
   for ((i=0; i<${#projects[@]}; i+=$projects_entry_width)); do
     if [[ "${projects[i]}" == "$project" ]]; then
@@ -310,8 +309,9 @@ open_tmp_worktree() {
 }
 
 close_and_flush_tmp_worktree() {
-  # Save EAR files from wortree before removal, to make it possible to be deployed later.
-  local ear=$(find "$tmp_dir" -type f -name "dwh-j2ee-*.ear")
+  # Save EAR files from worktree before removal, to make it possible to be deployed later.
+  local ear
+  ear=$(find "$tmp_dir" -type f -name "dwh-j2ee-*.ear")
   [[ -n "$ear" ]] && cp "$ear" "/tmp/$(basename $ear)"  # save ear file from worktree
 
   # delete temporary worktree and navigate to main working directory
@@ -344,19 +344,6 @@ xml_reactor_version() {
   fi
 }
 
-# Debugging helper, not used in current script pipeline
-pom_get() {
-  local pom="$1" e_parent="$2" e_target="$3" matches=""
-  log_debug "pom_get: $pom:$e_parent:$e_target"
-  if [[ -f "$pom" ]]; then
-    matches="$(xmlstarlet sel -t -v "/*[local-name()='$e_parent']/*[local-name()='$e_target']" -n "$pom" 2>/dev/null)"
-  else
-    matches="$(xmlstarlet sel -t -v "/*[local-name()='$e_parent']/*[local-name()='$e_target']" -n - 2>/dev/null <<<"$pom")"
-  fi
-
-  printf '%s\n' "$matches"
-}
-
 get_all_poms() {
   # Find all pom files in whitelisted projects. Ignores target directories
   local -a poms=()
@@ -385,7 +372,8 @@ resolve_artifact_to_pom() {
 
   for pom in "${poms[@]}"; do
     log_debug "pom: $pom"
-    local found="$(xml_reactor_artifactId "$pom")"
+    local found
+    found="$(xml_reactor_artifactId "$pom")"
     log_debug "reactor: $found"
     if [[ "$found" == "$reactor" ]]; then
       target_path="$pom"
@@ -402,14 +390,15 @@ resolve_to_commit() {
   local pom_dir="$1"
   local version="$2"
   local relative_path="$3"
-  local commits commit_found=""
+  local commit_found=""
 
   # Find all tagged commits of project containing the target pom
-  local commits=$(git -C "$pom_dir" for-each-ref --sort=-creatordate --format='%(objectname) %(refname:short)' refs/tags)
+  local commits
+  commits=$(git -C "$pom_dir" for-each-ref --sort=-creatordate --format='%(objectname) %(refname:short)' refs/tags)
 
   local cache_found_versions="" content ver commit tag
   while read -r commit tag; do
-    content="$(git -C "$pom_dir" show "$commit:$relative_path" 2>/dev/null)"
+    content="$(git -C "$pom_dir" show "$commit":"$relative_path" 2>/dev/null)"
     ver="$(xml_reactor_version "$content")"
     cache_found_versions="$cache_found_versions $ver"
 
@@ -430,7 +419,8 @@ git_resolve_module_to_commit() {
   local artifact="$1"
   local version="$2"
 
-  local target_path="$(resolve_artifact_to_pom $artifact)"
+  local target_path
+  target_path="$(resolve_artifact_to_pom "$artifact")"
 
   if [[ -z "$target_path" ]]; then
     log_error "No artifact '$artifact' found inside project pom-files"
@@ -443,10 +433,11 @@ git_resolve_module_to_commit() {
   relative_path="$(git -C "$target_dir" rev-parse --show-prefix)pom.xml"
 
   # Search commit containing the requested artifact version
-  local commit="$(resolve_to_commit $target_dir $version $relative_path)"
+  local commit
+  commit="$(resolve_to_commit "$target_dir" "$version" "$relative_path")"
 
   if [[ -z "$commit" ]]; then
-    log_error "Did not find '$module:$version'"
+    log_error "Did not find '$artifact:$version'"
   fi
 
   printf '%s:%s\n' "$target_path" "$commit"
@@ -481,39 +472,39 @@ parse_failure_context() {
 attempt_online_artifact_recovery() {
   # Install Maven artifact from online repository, if required module
   # has different group id than $BASE_GROUP_ID or is specifically called.
-    local req_group="$1"
-    local req_artifact="$2"
-    local req_version="$3"
-    local failed="$4"
-    local sdk_dir="$5"
+  local req_group="$1"
+  local req_artifact="$2"
+  local req_version="$3"
+  local failed="$4"
+  local sdk_dir="$5"
 
-    # todo: add a whitelist/blacklist for these hard-coded modules
-    # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
-    log_debug "try non aktin install of '$req_artifact'"
-    if { [[ -z "$failed" ]] && [[ "$req_artifact" != "$BASE_GROUP_ID"* ]]; } \
-       || [[ "$req_artifact" == *"query-i2b2-sql"* ]] \
-       || [[ "$req_artifact" == *"query-aggregate-rscript"* ]] \
-       || [[ "$req_artifact" == *"query-model"* ]]; then
+  # todo: add a whitelist/blacklist for these hard-coded modules
+  # todo: add functionality to "git_resolve_module_to_commit", that checks past pom versions (these modules were removed in newer releases but still depended on them)
+  log_debug "try non aktin install of '$req_artifact'"
+  if { [[ -z "$failed" ]] && [[ "$req_artifact" != "$BASE_GROUP_ID"* ]]; } \
+   || [[ "$req_artifact" == *"query-i2b2-sql"* ]] \
+   || [[ "$req_artifact" == *"query-aggregate-rscript"* ]] \
+   || [[ "$req_artifact" == *"query-model"* ]]; then
 
-      log_debug "Missing artifact not in config projects; trying dependency:get for '${req_group}:${req_artifact}:${req_version}'"
+    log_debug "Missing artifact not in config projects; trying dependency:get for '${req_group}:${req_artifact}:${req_version}'"
 
-      set +e
-      mvn dependency:get \
-        -DgroupId="$req_group" \
-        -DartifactId="$req_artifact" \
-        -Dversion="$req_version"
-      local rc=$?
-      set -e
+    set +e
+    mvn dependency:get \
+      -DgroupId="$req_group" \
+      -DartifactId="$req_artifact" \
+      -Dversion="$req_version"
+    local rc=$?
+    set -e
 
-      if (( rc != 0 )); then
-        return 1
-      fi
-
-      log_debug "Artifact '$req_artifact' was not part of parent group '$BASE_GROUP_ID' or was whitelisted therefore loaded in online Mode."
-      return 0
+    if (( rc != 0 )); then
+      return 1
     fi
 
-    return 1
+    log_debug "Artifact '$req_artifact' was not part of parent group '$BASE_GROUP_ID' or was whitelisted therefore loaded in online Mode."
+    return 0
+  fi
+
+  return 1
 }
 
 resolve_required_module() {
@@ -521,8 +512,9 @@ resolve_required_module() {
   local version="$2"
   local -n _required_pom_dir="$3"
   local -n _required_commit_id="$4"
+  local req_full
   req_full="$(git_resolve_module_to_commit "$artifact" "$version")"
-  req="${req_full##*$'\n'}"
+  local req="${req_full##*$'\n'}"
   IFS=':' read -r _required_pom_dir _required_commit_id <<<"$req"
 }
 
@@ -539,6 +531,7 @@ attempt_local_artifact_recovery() {
   log_error "Another module is required; add: \"$project_name\" \"<sdk>\" \"\" \"$required_commit_id\" to config and re-run"
   add_new_project_conf "$project_name" "$required_commit_id"
   close_and_flush_tmp_worktree
+  log_warn "Restarting script with updated config ${ORIG_ARGS[*]}"
   exec env -i \
     PATH="$BASE_PATH" \
     HOME="${HOME:-/home/$USER}" \
@@ -598,14 +591,13 @@ build_all_projects() {
     fi
 
     cd "$project_dir"
-    echo ""
 
     if [[ -z "$(git branch --show-current)" ]]; then
-      die 1 "'$project_name' is in detached HEAD; switch to a branch manually."
+      die "'$project_name' is in detached HEAD; switch to a branch manually."
     fi
 
     if [[ -z "$target_commit" ]]; then
-      [[ -n "$target_ref" ]] || die 1 "No reference/commit config for '$project_name'"
+      [[ -n "$target_ref" ]] || die "No reference/commit config for '$project_name'"
       log_debug "Resolving reference '$target_ref' → commit"
       target_commit="$(git_resolve_ref_to_commit "$target_ref")"
       log_debug "Resolved commit: $target_commit"
@@ -639,7 +631,7 @@ do_all_projects_exist() {
   done
 }
 
-
+# Ring terminal bell twice to signal build completion
 notify() {
   printf "\a"; sleep 0.15
   printf "\a"
@@ -656,8 +648,6 @@ notify() {
 
 
 get_configured_projects
-echo "System Java version: $(which java)"
-
 
 # VALIDATE - projects exist
 if ! do_all_projects_exist; then
@@ -669,7 +659,7 @@ fi
 # Safely build each maven project iteratively
 build_all_projects
 notify
-log_info "copy the .ear file to the dwh"
+log_info "Copying EAR file to DWH host"
 
 mapfile -t dwh_ears < <(
     for dir in "${projects_listed[@]}" "tmp"; do
@@ -681,13 +671,15 @@ mapfile -t dwh_ears < <(
     done
 )
 
-readonly ear_path=$(
+ear_path=$(
   stat -c '%Y %n' "${dwh_ears[@]}" \
     | sort -nr \
     | head -n1 \
     | cut -d' ' -f2-
 )
-ear_name="$(basename $ear_path)"
+readonly ear_path
+
+ear_name="$(basename "$ear_path")"
 log_debug "Newest EAR file: $ear_path"
 
 # push new ear to target
