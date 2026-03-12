@@ -129,9 +129,9 @@ CONFIG_FILE=""
 rm_packages="false"
 tmp_dir=""
 instance="debian"
-SDK8=""
-SDK11=""
-wildfly_container=""
+SDK8="$HOME/usr/lib/jvm/java-8-openjdk-amd64"
+SDK11="$HOME/usr/lib/jvm/java-11-openjdk-amd64"
+wildfly_container="dwh1-wildfly-1"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
