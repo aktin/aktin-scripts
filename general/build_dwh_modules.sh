@@ -20,62 +20,56 @@ if [ "$EUID" = 0 ]; then
 fi
 
 
-BASE_GROUP_ID="org.aktin"
+# check and init script parameters
+readonly BASE_GROUP_ID="org.aktin"
+server_ip=""
+build_from=""
+config_file=""
+rm_packages="false"
+tmp_dir=""
+instance="debian"
+sdk8="$HOME/usr/lib/jvm/java-8-openjdk-amd64"
+sdk11="$HOME/usr/lib/jvm/java-11-openjdk-amd64"
+wildfly_container="dwh1-wildfly-1"
 
 
 print_help() {
   local script
   script="$(basename "${BASH_SOURCE[0]}")"
 
-  # Use a heredoc and substitute only SCRIPT_NAME
   cat <<EOF
 Usage:
   ${script} --server-ip <IP> [options]
 
-Recommended Uses:
-  # Minimal
-  ${script} -p <IP> -d
-
 Description:
-  Builds and installs configured Maven modules (offline by default) and can optionally
-  clean local Maven artifacts before building. Uses a config file (projects.conf by default)
-  that is copied to script-config.conf for stable re-runs.
-
-Required:
-  -p, --server-ip <IP>         Target server IP / host used by later deployment steps.
-  --set-java-8                 Path to installed Java SDK 8
-  --set-java-11                Path to installed Java SDK 11
+  Builds and installs configured Maven modules (offline by default).
+  Optionally removes local Maven artifacts before building.
+  Uses a config file (projects.conf by default) that is copied to
+  script-config.conf for reproducible runs.
 
 Options:
-  -b, --build-from <NAME>      Start building from the given project name (skip earlier entries).
+  -p, --server-ip <IP>         Target server IP / host.
+  --set-java-8 <PATH>          Path to installed Java SDK 8.
+  --set-java-11 <PATH>         Path to installed Java SDK 11.
+
+  -b, --build-from <NAME>      Start building from the given project name.
                                Default: build all configured projects.
 
-  -d, --project-dir <DIR>      Root directory that contains the project folders.
+  -d, --project-dir <DIR>      Root directory containing project folders.
                                Default: current working directory.
 
-  -c, --config <FILE>            Path to config file to load projects array from.
-                               Default: ./projects.conf (will be copied to ./script-config.conf)
+  -c, --config <FILE>          Config file containing project list.
+                               Default: ./projects.conf (copied to ./script-config.conf)
 
-  -r, --remove-packages        Remove local Maven artifacts under ~/.m2/repository/org/aktin
-                               before building.
-                               Default: false
+  -r, --remove-packages        Remove local Maven artifacts under
+                               ~/.m2/repository/org/aktin before build.
 
-  -i, --instance <NAME>        Instance/environment selector.
-                               Default: debian, Options: debian, docker
+  -i, --instance <NAME>        Environment selector.
+                               Options: debian, docker (default: debian)
 
-  -w, --wildfly <NAME>         Name of Wildfly container. Required if instance is set to "docker".
+  -w, --wildfly <NAME>         Wildfly container name (required for docker).
 
-  -h, --help                   Show this help and exit.
-
-Examples:
-  ${script} -p 10.0.0.12
-  ${script} -p 10.0.0.12 -d /home/user/IdeaProjects -c ./projects.conf
-  ${script} -p dwh.example.org --remove-packages
-  ${script} -p 10.0.0.12 --build-from dwh-j2ee --instance debian
-
-Exit codes:
-  0  Success
-  1  Invalid arguments / missing required parameters
+  -h, --help                   Show this help message.
 EOF
 }
 
@@ -92,7 +86,7 @@ die() {
 }
 
 # does given project name exist in project list
-project_exists() {
+does_project_exist_in_list() {
   local project="$1"
   local project_name=""
 
@@ -120,19 +114,6 @@ export BASE_PATH
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 readonly SCRIPT_PATH
 
-
-# check and init script parameters
-# set project to start building from if not all should be build
-server_ip=""
-build_from=""
-CONFIG_FILE=""
-rm_packages="false"
-tmp_dir=""
-instance="debian"
-SDK8="$HOME/usr/lib/jvm/java-8-openjdk-amd64"
-SDK11="$HOME/usr/lib/jvm/java-11-openjdk-amd64"
-wildfly_container="dwh1-wildfly-1"
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
@@ -155,7 +136,7 @@ while [[ $# -gt 0 ]]; do
       ;;
 
     -c|--config)
-      CONFIG_FILE="$2"
+      config_file="$2"
       shift 2
       ;;
 
@@ -175,12 +156,12 @@ while [[ $# -gt 0 ]]; do
       ;;
 
     --set-java-8)
-      SDK8="$2"
+      sdk8="$2"
       shift 2
       ;;
 
     --set-java-11)
-      SDK11="$2"
+      sdk11="$2"
       shift 2
       ;;
 
@@ -205,8 +186,8 @@ if [[ "$instance" == "docker" ]] && [[ -z "$wildfly_container" ]]; then
   exit 1
 fi
 
-[[ -z "$SDK8" ]]  && die "SDK-8 path not set"
-[[ -z "$SDK11" ]] && die "SDK-11 path not set"
+[[ -z "$sdk8" ]]  && die "SDK-8 path not set"
+[[ -z "$sdk11" ]] && die "SDK-11 path not set"
 
 readonly rm_packages
 if [[ "$rm_packages" == "true" ]]; then
@@ -219,19 +200,19 @@ if [[ "$rm_packages" == "true" ]]; then
   fi
 fi
 
-if [[ -z "$CONFIG_FILE" ]]; then
-  CONFIG_FILE="$PWD/projects.conf"
+if [[ -z "$config_file" ]]; then
+  config_file="$PWD/projects.conf"
 fi
 
 # Copy config to script-config.conf so that reruns are stable and do not change original config file.
-if [[ "$(basename $CONFIG_FILE)" != "script-config.conf" ]];then
-  cp "$CONFIG_FILE" "$(dirname $CONFIG_FILE)/script-config.conf"
-  CONFIG_FILE="$(dirname $CONFIG_FILE)/script-config.conf"
+if [[ "$(basename $config_file)" != "script-config.conf" ]];then
+  cp "$config_file" "$(dirname $config_file)/script-config.conf"
+  config_file="$(dirname $config_file)/script-config.conf"
 fi
 
-readonly CONFIG_FILE
+readonly config_file
 
-source "$CONFIG_FILE" # Load project confs from .conf file
+source "$config_file" # Load project confs from .conf file
 if [[ "${#projects[@]}" -gt 100 ]]; then
   read -p "Warning. Current config size: '$(expr ${#projects[@]} / "$projects_entry_width")' (Press any key to continue, ctrl+c to stop)"
 fi
@@ -243,7 +224,7 @@ for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
     break
   fi
 done
-ORIG_ARGS=("${ORIG_ARGS[@]}" "-c" "$CONFIG_FILE")
+ORIG_ARGS=("${ORIG_ARGS[@]}" "-c" "$config_file")
 
 # remove 'remove-package' tag, to make further executions run faster
 for ((i=0;i<"${#ORIG_ARGS[@]}";i+=1)); do
@@ -257,7 +238,7 @@ done
 readonly -a ORIG_ARGS
 
 # end script if build from artifact is not in project configs
-[[ -n "$build_from" ]] && ! project_exists "$build_from" && die "Given Project '$build_from' not found in config."
+[[ -n "$build_from" ]] && ! does_project_exist_in_list "$build_from" && die "Given Project '$build_from' not found in config."
 if [[ -z "$build_from" ]]; then
   build_from=${projects[0]}   # root project default
 fi
@@ -285,8 +266,8 @@ add_new_project_conf(){
         "${projects[i]}" "${projects[i+1]}" "" "$commit"
         "${projects[@]:i}"
       )
-      declare -p projects > "$CONFIG_FILE" # save configs with newly added conf
-      log_info "Added alt config for '$project' with commit '$commit' into $CONFIG_FILE"
+      declare -p projects > "$config_file" # save configs with newly added conf
+      log_info "Added alt config for '$project' with commit '$commit' into $config_file"
       return 0
     fi
   done
@@ -684,20 +665,15 @@ log_debug "Newest EAR file: $ear_path"
 
 # push new ear to target
 debian_deploy() {
-  remote_cmd=""
-  remote_cmd+="sudo service wildfly stop;"
-  remote_cmd+="sudo rm /opt/wildfly/standalone/deployments/dwh*;"
-  remote_cmd+="mv /tmp/$ear_name /opt/wildfly/standalone/deployments;"
-  remote_cmd+="sudo service wildfly restart;"
+  local remote_cmd="
+    set -e
+    sudo systemctl stop wildfly
+    sudo rm -f /opt/wildfly/standalone/deployments/dwh*
+    sudo mv /tmp/${ear_name} /opt/wildfly/standalone/deployments/
+    sudo systemctl start wildfly
+  "
 
-  host="$server_user@$server_ip"
-  ctl="$HOME/.ssh/cm-%r@%h:%p"
-
-
-  ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
-  scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
-  ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
-  ssh -O exit -o ControlPath="$ctl" "$host"
+    ssh_remote_deploy "$remote_cmd"
 }
 
 
@@ -722,13 +698,15 @@ rm -f /opt/wildfly/standalone/deployments/dwh* || true
   # Currently Wildfly seems to automatically deploy the ear when copied to this directory.
   remote_cmd+="sudo docker cp /tmp/$ear_name $wildfly_container:/opt/wildfly/standalone/deployments/ ; "
   # todo: add a command to remote_cmd that manually deploys the ear if it is not deployed automatically.
+  ssh_remote_deploy "$remote_cmd"
+}
 
+ssh_remote_deploy() {
+  local remote_cmd="$1"
   host="$server_user@$server_ip"
   ctl="$HOME/.ssh/cm-%r@%h:%p"
 
-  # start a new ssh session
   ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$ctl" -Nf "$host"
-  # copy ear to target host
   scp -o ControlPath="$ctl" "$ear_path" "$host:/tmp/$ear_name"
   ssh -o ControlPath="$ctl" "$host" "$remote_cmd"
   ssh -O exit -o ControlPath="$ctl" "$host"
