@@ -6,7 +6,7 @@
 #
 # Usage:
 #   BASE_URL=http://localhost:80/aktin/admin/rest \
-#   AKTIN_USER=admin AKTIN_PASSWORD=secret \
+#   AKTIN_USER=i2b2 AKTIN_PASSWORD=secret \
 #   ./import-consent.sh <studyId> <reference:Patient|Encounter|Billing> <extension> <participation:OptIn|OptOut> [sic] [comment]
 
 set -euo pipefail
