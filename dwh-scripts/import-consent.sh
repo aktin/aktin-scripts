@@ -28,7 +28,7 @@ read_csv() {
     fi
 
     local header
-    header=$(head -n 1 "${csv_file}")
+    header=$(head -n1 "$csv_file" | sed '1s/^\xEF\xBB\xBF//' | tr -d '\r')
 
     local col_index
     col_index=$(awk -F"${separator}" -v col="${column_name}" '
@@ -42,6 +42,7 @@ read_csv() {
 
     REFERENCE_VALUES=()
     while IFS= read -r line; do
+        line=${line%$'\r'}
         REFERENCE_VALUES+=("$(cut -d"${separator}" -f"${col_index}" <<< "${line}")")
     done < <(tail -n +2 "${csv_file}")
 }
@@ -159,7 +160,7 @@ import_single_consent() {
 EOF
 )
 
-    curl -sf -X POST "${BASE_URL}/studies/${STUDY_ID}/patients/batch" \
+    curl -X POST "${BASE_URL}/studies/${STUDY_ID}/patients/batch" \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Content-Type: application/json" \
         -d "${payload}"
@@ -178,6 +179,7 @@ import_consents_from_file() {
 
     local extension
     for extension in "${REFERENCE_VALUES[@]}"; do
+        echo "Importing ${extension}"
         import_single_consent "${extension}"
     done
 }
