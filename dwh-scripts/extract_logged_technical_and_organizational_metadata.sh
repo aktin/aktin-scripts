@@ -78,7 +78,6 @@ cat /etc/os-release >> "$LOGFOLDER/version.txt" 2>/dev/null || true
 
 echo -e "+++++ POSTGRES VERSION +++++" >> "$LOGFOLDER/version.txt"
 if [[ "$DEPLOYMENT_TYPE" == "Docker" ]]; then
-    #TODO: Abklären, ob psql logs notwendig sind, weil momentan nicht erreichbar
     if command -v psql &>/dev/null; then
         psql --version >> "$LOGFOLDER/version.txt"
     else
