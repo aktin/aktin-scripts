@@ -1,41 +1,49 @@
 #! /bin/bash
-
-# script to diagnose errors and bundle them with metadata for mail service
-# maintainer: manissen@ukaachen.de
+#--------------------------------------
+# Script Name:  extract_logged_technical_and_organizational_metadata
+# Version:      1.0
+# Authors:      manissen@ukaachen.de
+# Date:         12 Aug 26
+# Purpose:      script to diagnose errors and bundle them with metadata for mail service
+#--------------------------------------
 set -euo pipefail
+
+#global variables
+readonly WILDFLY_HOME=/opt/wildfly
+readonly CURRENT=$(date +%Y_%m_%d_%H%M)
+APACHE_LOG=""
+POSTGRES_LOG=""
 
 # deployment detection
 if [[ -f /.dockerenv ]]; then
     DEPLOYMENT_TYPE="Docker"
-    WILDFLY_HOME="/opt/wildfly"
     POSTGRES_HOST="database"
 else
     DEPLOYMENT_TYPE="Debian"
-    WILDFLY_HOME="/opt/wildfly"
     APACHE_LOG="/var/log/apache2"
     POSTGRES_LOG="/var/log/postgresql"
 fi
 
-# setup
-CURRENT=$(date +%Y_%m_%d_%H%M)
+# create log directory
 readonly LOGFOLDER="/tmp/aktin_diag_$CURRENT"
 if [[ ! -d "$LOGFOLDER" ]]; then
+    rm -rf "$LOGFOLDER"
     mkdir "$LOGFOLDER"
 fi
 
 # wildfly logs
 cp -R "$WILDFLY_HOME/standalone/log" "$LOGFOLDER/wildfly_log" \
-    || echo "Failed to copy wildfly logs" > "$LOGFOLDER/wildfly_log_error.txt"
+    || echo "Failed to copy wildfly logs" > "$LOGFOLDER/error_log.txt"
 
 # apache und postgres logs
-if [[ "$DEPLOYMENT_TYPE" == "Docker" ]]; then
+if [[ ! (-n $APACHE_LOG && -n $POSTGRES_LOG) ]]; then
     echo "Apache logs are NOT accessible from inside the Wildfly container." > "$LOGFOLDER/apache_log_unavailable.txt"
     echo "PostgreSQL logs are NOT accessible from inside the Wildfly container." > "$LOGFOLDER/postgresql_log_unavailable.txt"
 else
     cp -R "$APACHE_LOG" "$LOGFOLDER/apache_log" \
-        || echo "Failed to copy apache logs" > "$LOGFOLDER/apache_log_error.txt"
+        || echo "Failed to copy apache logs" > "$LOGFOLDER/error_log.txt"
     cp -R "$POSTGRES_LOG" "$LOGFOLDER/postgresql_log" \
-        || echo "Failed to copy postgresql logs" > "$LOGFOLDER/postgresql_log_error.txt"
+        || echo "Failed to copy postgresql logs" > "$LOGFOLDER/error_log.txt"
 fi
 
 # wildfly deployments
@@ -43,6 +51,14 @@ ls -l "$WILDFLY_HOME/standalone/deployments/" > "$LOGFOLDER/deployments.txt" || 
 
 #  disk space
 df -hT > "$LOGFOLDER/diskspace.txt"
+
+log_processes() {
+    local header="$1"
+    local process="$2"
+
+    echo -e "+++++ $header PS +++++" >> "$LOGFOLDER/services.txt"
+    ps -ef | grep "$process" >> "$LOGFOLDER/services.txt" || true
+}
 
 # services and processes
 echo -e "+++++ WILDFLY SERVICE STATUS +++++" > "$LOGFOLDER/services.txt"
@@ -52,8 +68,7 @@ else
     service wildfly status >> "$LOGFOLDER/services.txt" || true
 fi
 
-echo -e "+++++ WILDFLY PS +++++" >> "$LOGFOLDER/services.txt"
-ps -ef | grep wildfly >> "$LOGFOLDER/services.txt" || true
+log_processes "WILDFLY" "wildfly"
 
 echo -e "+++++ POSTGRES SERVICE STATUS +++++" >> "$LOGFOLDER/services.txt"
 if [[ "$DEPLOYMENT_TYPE" == "Docker" ]]; then
@@ -66,11 +81,8 @@ else
     service postgresql status >> "$LOGFOLDER/services.txt" || true
 fi
 
-echo -e "+++++ POSTGRES PS +++++" >> "$LOGFOLDER/services.txt"
-ps -ef | grep postgresql >> "$LOGFOLDER/services.txt" || true
-
-echo -e "+++++ JAVA PS +++++" >> "$LOGFOLDER/services.txt"
-ps -ef | grep java >> "$LOGFOLDER/services.txt" || true
+log_processes "POSTGRES" "postgresql"
+log_processes "JAVA" "java"
 
 # versions
 echo -e "+++++ OPERATING SYSTEM +++++" > "$LOGFOLDER/version.txt"
@@ -94,21 +106,21 @@ java --version >> "$LOGFOLDER/version.txt" 2>&1 || true
 top -b -n 1 | head -n 30 > "$LOGFOLDER/ram.txt" || true
 
 # aktin metadata
-echo -e "+++++ INSTITUTION ID +++++" >> "$LOGFOLDER/metadata.txt"
-grep "^local.o=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
+echo -e "+++++ INSTITUTION ID +++++" > "$LOGFOLDER/metadata.txt"
+grep "^local\.o=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
 
 echo -e "+++++ SITE ID +++++" >> "$LOGFOLDER/metadata.txt"
-grep "^local.ou=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
+grep "^local\.ou=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
 
 echo -e "+++++ DWH VERSION +++++" >> "$LOGFOLDER/metadata.txt"
-grep "^local.cn=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
+grep "^local\.cn=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "$LOGFOLDER/metadata.txt" || true
 
 echo -e "+++++ DEPLOYMENT TYPE +++++" >> "$LOGFOLDER/metadata.txt"
 echo "$DEPLOYMENT_TYPE" >> "$LOGFOLDER/metadata.txt"
 
 # permissions and folders
 if [[ -d /var/lib/aktin/ ]]; then
-    ls -ld /var/lib/aktin/ >> "$LOGFOLDER/permissions.txt"
+    ls -ld /var/lib/aktin/ > "$LOGFOLDER/permissions.txt"
 
     # reports
     if [[ -d /var/lib/aktin/reports ]]; then
@@ -163,11 +175,36 @@ else
 fi
 
 # R environment variables
-R --vanilla --slave -e 'Sys.getenv()' > "$LOGFOLDER/R_environment_vars.txt" 2>/dev/null \
+readonly R_SAFE_ENV_VARS=(
+    COLORTERM
+    XYZ
+)
+{
+    echo "+++++ R VERSION +++++"
+
+    if command -v R &>/dev/null; then
+        R --version 2>&1 | head -n 1
+
+        echo "+++++ R HOME +++++"
+        R RHOME 2>/dev/null || true
+
+        echo
+        echo "+++++ R ENVIRONMENT VARIABLES +++++"
+
+        for var in "${R_SAFE_ENV_VARS[@]}"; do
+            if [[ -n "${!var+x}" ]]; then
+                printf '%s=%s\n' "$var" "${!var}"
+            else
+                printf '%s is not set\n' "$var"
+            fi
+        done
+    else
+        echo "R is not installed or not available." > "$LOGFOLDER/error_log.txt"
+    fi
+} > "$LOGFOLDER/R_environment_vars.txt" 2>/dev/null \
   || echo "R is not installed or not available." > "$LOGFOLDER/R_environment_vars.txt"
 
 # archive
-ARCHIVE_NAME="aktin_diag_$CURRENT.tar.gz"
-ARCHIVE_PATH="/tmp/$ARCHIVE_NAME"
-tar -czf "$ARCHIVE_PATH" --absolute-names --warning=no-file-changed "$LOGFOLDER/"
-echo "$ARCHIVE_PATH"
+tar -czf "${LOGFOLDER}.tar.gz" --absolute-names --warning=no-file-changed "$LOGFOLDER/" || true
+rm -rf "$LOGFOLDER"
+echo "${LOGFOLDER}.tar.gz"
