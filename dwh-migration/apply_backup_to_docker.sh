@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
 # Script: apply_backup_to_docker.sh
-# Version: 1.0
+# Version: 1.1
 # Author:  whoy@ukaachen.de
-# Date:    2025-06-04
+# Date:    14 SEP 26
 # Purpose: Restore i2b2/aktin DBs from a given tar.gz into the target DWH
 #          Docker stack (PostgreSQL + WildFly + Apache HTTPD).
 #--------------------------------------
@@ -149,6 +149,25 @@ cleanup_host_temp() {
     done
 }
 
+# Merge-copy source folder onto target folder. Target folder is inside a docker container. Every file in source overwrites
+# the corresponding file at the same relative path in target (creating parent
+# dirs as needed). Files only present in target are left untouched.
+merge_backup_folder() {
+    local source_dir="$1"
+    local target_dir="$2"
+    local target_container="$3"
+
+    mkdir -p "$target_dir"
+
+    find "$source_dir" -type f -print0 | while IFS= read -r -d '' src_file; do
+        local rel_path="${src_file#"$source_dir"/}"
+        local dest_file="$target_container:$target_dir/$rel_path"
+
+        mkdir -p "$(dirname "$dest_file")"
+        sudo docker cp "$src_file" "$dest_file"
+    done
+}
+
 main() {
     # Sanity checks
     assert_same_prefix
@@ -171,7 +190,7 @@ main() {
     copy_config_into_container "$backup_dir_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
 
     # Push /var/lib/aktin payload and fix ownership
-    sudo docker cp "$backup_dir_host/var/lib/aktin" "$wildfly_container:/var/lib"
+    merge_backup_folder "$backup_dir_host/var/lib/aktin" "/var/lib/aktin" "$wildfly_container"
     sudo docker exec -u 0 "$wildfly_container" chown -R wildfly:wildfly /var/lib/aktin
 
     # Bring everything back up and clean host temp files

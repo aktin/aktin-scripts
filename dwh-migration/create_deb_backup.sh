@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  create_deb_backup.sh
-# Version:      2.0
+# Version:      2.1
 # Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
-# Date:         08 Sep 25
+# Date:         14 SEP 26
 # Purpose:      Backups database and configuration files of an AKTIN DWH as a tar.gz. Used for the
 #               migration from version 1.4 (install-script) to version 1.5 (debian package) and now version 1.6 (docker)
 #--------------------------------------
@@ -37,7 +37,7 @@ remove_dir() {
 }
 
 tar_dir()  {
-    tar -czf aktin_backup_$current.tar.gz --absolute-names --warning=no-file-changed $1/*
+    tar -czf aktin_backup_$current.tar.gz --exclude="$1/var/lib/aktin/import-scripts" --absolute-names --warning=no-file-changed $1/*
 }
 
 backup_file() {
