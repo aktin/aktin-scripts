@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  apply_backup_to_deb.sh
-# Version:      2.0
+# Version:      2.1
 # Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
-# Date:         08 SEP 25
+# Date:         14 SEP 26
 # Purpose:      Installs a new AKTIN DWH from repository and fills it with backed up data from a
 #               given tar.gz file
 #--------------------------------------
@@ -36,7 +36,7 @@ fi
 extract_tarfile_and_get_folder_path() {
     local tar="$1"
     # create a temporary directory for extraction
-    local temp_dir=$(mktemp -d)
+    local temp_dir=$(mktemp -d -p "$PWD")
     # extract the archive into the temporary directory
     tar -xf "$tar" -C "$temp_dir"
     # check if exactly one folder exists in the extracted content
@@ -103,37 +103,28 @@ patch_wilfly_conf() {
     chown wildfly:wildfly $wildfly_home/bin/standalone.conf
 }
 
-import_folder_backup() {
-    local backup_folder=$1
-    local source_folder=$2
-    echo "importing backup of $source_folder"
-    cp -r $backup_folder$source_folder/* $source_folder
-    chown -R wildfly:wildfly $source_folder
-}
-
 import_databases_backup() {
-    local backup_folder=$1
-    echo "deleting aktin and i2b2 databases"
-    sudo -u postgres dropdb --if-exists aktin
-    sudo -u postgres dropuser --if-exists aktin
-    sudo -u postgres dropdb --if-exists i2b2
-    sudo -u postgres dropuser --if-exists i2b2crcdata
-    sudo -u postgres dropuser --if-exists i2b2hive
-    sudo -u postgres dropuser --if-exists i2b2imdata
-    sudo -u postgres dropuser --if-exists i2b2metadata
-    sudo -u postgres dropuser --if-exists i2b2pm
-    sudo -u postgres dropuser --if-exists i2b2workdata
-    echo "reinitialising aktin and i2b2 databases"
-    sudo -u postgres psql -c "CREATE DATABASE aktin;"
-    sudo -u postgres psql -d aktin -c "CREATE USER aktin with PASSWORD 'aktin'; CREATE SCHEMA AUTHORIZATION aktin; GRANT ALL ON SCHEMA aktin to aktin; ALTER ROLE aktin WITH LOGIN;"
-    sudo -u postgres psql -c "CREATE DATABASE i2b2;"
-    sudo -u postgres psql -d i2b2 -c "CREATE USER i2b2crcdata WITH PASSWORD 'demouser'; CREATE USER i2b2hive WITH PASSWORD 'demouser'; CREATE USER i2b2imdata WITH PASSWORD 'demouser'; CREATE USER i2b2metadata WITH PASSWORD 'demouser'; CREATE USER i2b2pm WITH PASSWORD 'demouser'; CREATE USER i2b2workdata WITH PASSWORD 'demouser'; CREATE SCHEMA AUTHORIZATION i2b2crcdata; CREATE SCHEMA AUTHORIZATION i2b2hive; CREATE SCHEMA AUTHORIZATION i2b2imdata; CREATE SCHEMA AUTHORIZATION i2b2metadata; CREATE SCHEMA AUTHORIZATION i2b2pm; CREATE SCHEMA AUTHORIZATION i2b2workdata;"
+    local backup_folder=$1      # Path to the extracted backup folder
+    local path_to_pmcell_backup="/tmp/pmbackup.sql"  # Temp file for pm_cell_data snapshot
+
+    # Snapshot i2b2pm.pm_cell_data before full import
+    sudo -u postgres pg_dump -t i2b2pm.pm_cell_data i2b2 --data-only > "$path_to_pmcell_backup"
+
+    # postgres user can't read inside root's 0700 mktemp dir, so stage the dumps in /tmp/ first
     echo "copy database backups to /tmp/"
     cp "$backup_folder/backup_i2b2.sql" /tmp/
     cp "$backup_folder/backup_aktin.sql" /tmp/
+
     echo "importing the backup of aktin and i2b2 databases"
-    sudo -u postgres psql -d i2b2 -f "/tmp/backup_i2b2.sql"
-    sudo -u postgres psql -d aktin -f "/tmp/backup_aktin.sql"
+    # Import i2b2 and aktin into the already-initialised databases from the package install
+    sudo -u postgres psql -d i2b2 -f "/tmp/backup_i2b2.sql" > /dev/null 2>&1
+    sudo -u postgres psql -d aktin -f "/tmp/backup_aktin.sql" > /dev/null 2>&1
+
+    # Reapply pm_cell_data
+    echo "importing pm cells"
+    sudo -u postgres psql -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null 2>&1
+    sudo -u postgres psql -d i2b2 -q -f "$path_to_pmcell_backup"
+    rm -f "$path_to_pmcell_backup" /tmp/backup_i2b2.sql /tmp/backup_aktin.sql
 }
 
 run_info_service() {
@@ -151,13 +142,32 @@ restart_aktin_services() {
     service wildfly start
 }
 
+# Merge-copy source folder onto target folder. Target folder is inside a docker container. Every file in source overwrites
+# the corresponding file at the same relative path in target (creating parent
+# dirs as needed). Files only present in target are left untouched.
+merge_backup_folder() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    mkdir -p "$target_dir"
+
+    find "$source_dir" -type f -print0 | while IFS= read -r -d '' src_file; do
+        local rel_path="${src_file#"$source_dir"/}"
+        local dest_file="$target_dir/$rel_path"
+
+        mkdir -p "$(dirname "$dest_file")"
+        cp -f "$src_file" "$dest_file"
+    done
+    chown -R wildfly:wildfly $source_dir
+}
+
 main() {
     local backup_folder=$(extract_tarfile_and_get_folder_path $tarfile)
     install_aktin_packages
     stop_aktin_services
     patch_aktin_properties "$backup_folder"
     patch_wilfly_conf "$backup_folder"
-    import_folder_backup "$backup_folder" "/var/lib/aktin"
+    merge_backup_folder "$backup_folder" "/var/lib/aktin"
     import_databases_backup "$backup_folder"
     run_info_service
     run_update_service

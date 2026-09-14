@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  create_docker_backup.sh
-# Version:      1.0
+# Version:      1.1
 # Author:       whoy@ukaachen.de
-# Date:         4 Jun 25
+# Date:         14 SEP 26
 # Purpose:      Creates a backup file of a AKTIN dockerized data warehouse,
 #               containing data and configurations of the original
 #--------------------------------------
@@ -60,12 +60,12 @@ backup_database() {
     local destination="$2"
 
     echo -e "create backup of database $db"
-    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" > "$destination"
+    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" --clean > "$destination"
 }
 
 # compresses the backup files into the final tar.gz archive
 tar_dir()  {
-    tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
+    tar -czf aktin_backup_"$current".tar.gz --exclude="$1/var/lib/aktin/import-scripts" --absolute-names --warning=no-file-changed "$1"/*
 }
 
 
