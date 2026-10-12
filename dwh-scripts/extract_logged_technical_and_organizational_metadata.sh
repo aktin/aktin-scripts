@@ -62,11 +62,18 @@ log_processes() {
 
 # services and processes
 echo -e "+++++ WILDFLY SERVICE STATUS +++++" > "$LOGFOLDER/services.txt"
-if [[ "$DEPLOYMENT_TYPE" == "Docker" ]]; then
-    echo "Running inside Wildfly container" >> "$LOGFOLDER/services.txt"
+if [ -x "$WILDFLY_HOME/bin/jboss-cli.sh" ]; then
+    "$WILDFLY_HOME/bin/jboss-cli.sh" --connect --commands=":read-attribute(name=server-state)" < /dev/null >> "$LOGFOLDER/services.txt" 2>&1 || true
 else
-    service wildfly status >> "$LOGFOLDER/services.txt" || true
+    echo "jboss-cli.sh not found under $WILDFLY_HOME/bin/" >> "$LOGFOLDER/services.txt"
 fi
+if [[ "$DEPLOYMENT_TYPE" = "Debian" ]]; then
+    echo -e "\n+++++ WILDFLY SYSTEMD SERVICE STATUS +++++" >> "$LOGFOLDER/services.txt"
+    service wildfly status >> "$LOGFOLDER/services.txt" 2>&1 || true
+fi
+echo -e "\n+++++ DEPLOYMENT STATUS MARKERS +++++" >> "$LOGFOLDER/services.txt"
+ls -1 "$WILDFLY_HOME/standalone/deployments"/*.{deployed,failed,isdeploying} >> "$LOGFOLDER/services.txt" 2>&1 || true
+
 
 log_processes "WILDFLY" "wildfly"
 
@@ -117,92 +124,6 @@ grep "^local\.cn=" /etc/aktin/aktin.properties 2>/dev/null | cut -d '=' -f2 >> "
 
 echo -e "+++++ DEPLOYMENT TYPE +++++" >> "$LOGFOLDER/metadata.txt"
 echo "$DEPLOYMENT_TYPE" >> "$LOGFOLDER/metadata.txt"
-
-# permissions and folders
-if [[ -d /var/lib/aktin/ ]]; then
-    ls -ld /var/lib/aktin/ > "$LOGFOLDER/permissions.txt"
-
-    # reports
-    if [[ -d /var/lib/aktin/reports ]]; then
-        ls -ld /var/lib/aktin/reports >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/reports DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # report-temp
-    if [[ -d /var/tmp/report-temp ]]; then
-        ls -ld /var/tmp/report-temp >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/tmp/report-temp DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # report-archive
-    if [[ -d /var/lib/aktin/report-archive ]]; then
-        ls -ld /var/lib/aktin/report-archive >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/report-archive DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # broker
-    if [[ -d /var/lib/aktin/broker ]]; then
-        ls -ld /var/lib/aktin/broker >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/broker DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # broker-archive
-    if [[ -d /var/lib/aktin/broker-archive ]]; then
-        ls -ld /var/lib/aktin/broker-archive >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/broker-archive DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # import
-    if [[ -d /var/lib/aktin/import ]]; then
-        ls -ld /var/lib/aktin/import >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/import DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-
-    # import-scripts
-    if [[ -d /var/lib/aktin/import-scripts ]]; then
-        ls -ld /var/lib/aktin/import-scripts >> "$LOGFOLDER/permissions.txt"
-    else
-        echo "/var/lib/aktin/import-scripts DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-    fi
-else
-    echo "FOLDER /var/lib/aktin DOES NOT EXIST" >> "$LOGFOLDER/permissions.txt"
-fi
-
-# R environment variables
-readonly R_SAFE_ENV_VARS=(
-    COLORTERM
-    XYZ
-)
-{
-    echo "+++++ R VERSION +++++"
-
-    if command -v R &>/dev/null; then
-        R --version 2>&1 | head -n 1
-
-        echo "+++++ R HOME +++++"
-        R RHOME 2>/dev/null || true
-
-        echo
-        echo "+++++ R ENVIRONMENT VARIABLES +++++"
-
-        for var in "${R_SAFE_ENV_VARS[@]}"; do
-            if [[ -n "${!var+x}" ]]; then
-                printf '%s=%s\n' "$var" "${!var}"
-            else
-                printf '%s is not set\n' "$var"
-            fi
-        done
-    else
-        echo "R is not installed or not available." > "$LOGFOLDER/error_log.txt"
-    fi
-} > "$LOGFOLDER/R_environment_vars.txt" 2>/dev/null \
-  || echo "R is not installed or not available." > "$LOGFOLDER/R_environment_vars.txt"
 
 # archive
 tar -czf "${LOGFOLDER}.tar.gz" --absolute-names --warning=no-file-changed "$LOGFOLDER/" || true
