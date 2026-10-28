@@ -3,7 +3,7 @@
 # Script Name:  create_docker_backup.sh
 # Version:      1.1
 # Author:       whoy@ukaachen.de
-# Date:         08 Okt 26
+# Date:         28 OKT 26
 # Purpose:      Creates a backup file of a AKTIN dockerized data warehouse,
 #               containing data and configurations of the original
 #--------------------------------------

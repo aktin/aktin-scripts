@@ -3,7 +3,7 @@
 # Script Name:  apply_backup_to_deb.sh
 # Version:      2.1
 # Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
-# Date:         14 SEP 26
+# Date:         28 OKT 26
 # Purpose:      Installs a new AKTIN DWH from repository and fills it with backed up data from a
 #               given tar.gz file
 #--------------------------------------

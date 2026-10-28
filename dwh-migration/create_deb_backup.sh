@@ -3,7 +3,7 @@
 # Script Name:  create_deb_backup.sh
 # Version:      2.1
 # Author:       akombeiz@ukaachen.de, whoy@ukaachen.de
-# Date:         14 SEP 26
+# Date:         28 OKT 26
 # Purpose:      Backups database and configuration files of an AKTIN DWH as a tar.gz. Used for the
 #               migration from version 1.4 (install-script) to version 1.5 (debian package) and now version 1.6 (docker)
 #--------------------------------------
