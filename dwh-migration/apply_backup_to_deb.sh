@@ -103,6 +103,28 @@ patch_wilfly_conf() {
     chown wildfly:wildfly $wildfly_home/bin/standalone.conf
 }
 
+merge_aktin_lib_dir() {
+    local backup_folder=$1
+    # Merge /var/lib/aktin payload and fix ownership.
+    # Drop import-scripts first to safely ignore it during merge
+    echo "merging /var/lib/aktin with backup"
+    rm -rf "$backup_folder/var/lib/aktin/import-scripts"
+    cp -r "$backup_folder/var/lib/aktin/." /var/lib/aktin
+    chown -R wildfly:wildfly /var/lib/aktin
+}
+
+# Drop a database and create it again empty, keeping its owner.
+# Ensures the restored database is an exact copy of the backup, without objects only the target had
+recreate_database() {
+    local db=$1
+    local owner
+    owner=$(sudo -u postgres psql -tA -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$db';")
+
+    echo "recreating empty database $db (owner: $owner)"
+    sudo -u postgres psql -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$db\";"
+    sudo -u postgres psql -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\" OWNER \"$owner\" TEMPLATE template0;"
+}
+
 import_databases_backup() {
     local backup_folder=$1      # Path to the extracted backup folder
     local path_to_pmcell_backup="/tmp/pmbackup.sql"  # Temp file for pm_cell_data snapshot
@@ -110,21 +132,22 @@ import_databases_backup() {
     # Snapshot i2b2pm.pm_cell_data before full import
     sudo -u postgres pg_dump -t i2b2pm.pm_cell_data i2b2 --data-only > "$path_to_pmcell_backup"
 
-    # postgres user can't read inside root's 0700 mktemp dir, so stage the dumps in /tmp/ first
-    echo "copy database backups to /tmp/"
-    cp "$backup_folder/backup_i2b2.sql" /tmp/
-    cp "$backup_folder/backup_aktin.sql" /tmp/
+    recreate_database "i2b2"
+    recreate_database "aktin"
 
     echo "importing the backup of aktin and i2b2 databases"
-    # Import i2b2 and aktin into the already-initialised databases from the package install
-    sudo -u postgres psql -d i2b2 -f "/tmp/backup_i2b2.sql" > /dev/null 2>&1
-    sudo -u postgres psql -d aktin -f "/tmp/backup_aktin.sql" > /dev/null 2>&1
+    # Import i2b2 and aktin into the freshly recreated databases.
+    # Feed the dumps via stdin: the root shell opens the files before sudo drops privileges,
+    # so postgres doesn't need read access to root's 0700 mktemp dir
+    # ON_ERROR_STOP makes psql exit non-zero on the first failed statement, so set -e aborts the migration
+    sudo -u postgres psql -q -v ON_ERROR_STOP=1 -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null
+    sudo -u postgres psql -q -v ON_ERROR_STOP=1 -d aktin < "$backup_folder/backup_aktin.sql" > /dev/null
 
     # Reapply pm_cell_data
     echo "importing pm cells"
-    sudo -u postgres psql -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null 2>&1
-    sudo -u postgres psql -d i2b2 -q -f "$path_to_pmcell_backup"
-    rm -f "$path_to_pmcell_backup" /tmp/backup_i2b2.sql /tmp/backup_aktin.sql
+    sudo -u postgres psql -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null
+    sudo -u postgres psql -d i2b2 -q -v ON_ERROR_STOP=1 -f "$path_to_pmcell_backup"
+    rm -f "$path_to_pmcell_backup"
 }
 
 run_info_service() {
@@ -142,32 +165,13 @@ restart_aktin_services() {
     service wildfly start
 }
 
-# Merge-copy source folder onto target folder. Target folder is inside a docker container. Every file in source overwrites
-# the corresponding file at the same relative path in target (creating parent
-# dirs as needed). Files only present in target are left untouched.
-merge_backup_folder() {
-    local source_dir="$1"
-    local target_dir="$2"
-
-    mkdir -p "$target_dir"
-
-    find "$source_dir" -type f -print0 | while IFS= read -r -d '' src_file; do
-        local rel_path="${src_file#"$source_dir"/}"
-        local dest_file="$target_dir/$rel_path"
-
-        mkdir -p "$(dirname "$dest_file")"
-        cp -f "$src_file" "$dest_file"
-    done
-    chown -R wildfly:wildfly $source_dir
-}
-
 main() {
     local backup_folder=$(extract_tarfile_and_get_folder_path $tarfile)
     install_aktin_packages
     stop_aktin_services
     patch_aktin_properties "$backup_folder"
     patch_wilfly_conf "$backup_folder"
-    merge_backup_folder "$backup_folder" "/var/lib/aktin"
+    merge_aktin_lib_dir "$backup_folder"
     import_databases_backup "$backup_folder"
     run_info_service
     run_update_service

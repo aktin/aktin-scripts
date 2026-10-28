@@ -58,14 +58,14 @@ backup_aktin() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db --clean > "$destination"
+    sudo -u postgres pg_dump $db --clean --if-exists > "$destination"
 }
 
 backup_i2b2() {
     local db="i2b2"
     local destination=$1
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db --clean > "$destination"
+    sudo -u postgres pg_dump $db --clean --if-exists > "$destination"
 }
 
 main() {
