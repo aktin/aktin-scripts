@@ -12,8 +12,8 @@ set -euo pipefail
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 4 ]] && {
-  echo "Usage: $0 <broker_url> <admin_api_key> <start_id> <end_id>"
-  exit 1
+    echo "Usage: $0 <broker_url> <admin_api_key> <start_id> <end_id>"
+    exit 1
 }
 
 readonly broker_url="$1/broker"
@@ -22,19 +22,21 @@ readonly request_id_start=$3
 readonly request_id_end=$4
 
 # retrieve a list of requests from the broker
+# shellcheck disable=SC2155 # masking the curl exit code is current behavior, splitting would abort under set -e
 readonly requests=$(curl -s --request GET "$broker_url/request" --header "Authorization: Bearer $admin_api_key")
 
 # extract individual request IDs from the retrieved list
-readonly request_ids=$(grep -Po '<request id="\K[^"]+' <<<"${requests}")
+mapfile -t request_ids < <(grep -Po '<request id="\K[^"]+' <<<"${requests}")
+readonly request_ids
 
 download_request_status() {
-  local request_id=$1
-  curl -s --request GET "$broker_url/request/$request_id/status" --header "Authorization: Bearer $admin_api_key" -o "${request_id}_status.xml"
+    local request_id=$1
+    curl -s --request GET "$broker_url/request/$request_id/status" --header "Authorization: Bearer $admin_api_key" -o "${request_id}_status.xml"
 }
 
 # iterate and download request status within the specified ID range
-for request_id in ${request_ids[@]}; do
-  if [[ $request_id -ge $request_id_start && $request_id -le $request_id_end ]]; then
-    download_request_status "$request_id"
-  fi
+for request_id in "${request_ids[@]}"; do
+    if [[ $request_id -ge $request_id_start && $request_id -le $request_id_end ]]; then
+        download_request_status "$request_id"
+    fi
 done
