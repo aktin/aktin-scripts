@@ -21,7 +21,8 @@ readonly whi="\e[0m"    # white (reset)
 readonly ora="\e[1;33m" # orange (bold)
 readonly red="\e[1;31m" # red (bold)
 
-readonly current_date=$(date +%Y-%m-%d_%H:%M)
+current_date=$(date +%Y-%m-%d_%H:%M)
+readonly current_date
 readonly output_fall="output_fall_$current_date.csv"
 readonly output_fab="output_fab_$current_date.csv"
 readonly output_icd="output_icd_$current_date.csv"
@@ -53,9 +54,11 @@ fi
 # Unzip the p21.zip file to the temporary directory.
 # Rename files in the temporary directory to lowercase.
 # Initialize variables to store the paths of specific CSV files.
-readonly tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d)
+readonly tmp_dir
 unzip -q "$path_p21_zip" -d "$tmp_dir"
 find "$tmp_dir" -type f -exec sh -c 'mv "$0" "${0%/*}/$(basename "${0}" | tr "[:upper:]" "[:lower:]")"' {} \;
+# shellcheck disable=SC2045 # file names come from the p21 zip, kept as is to preserve behavior
 for file in $(ls "$tmp_dir"); do
     case "$file" in
     "fall.csv")
@@ -134,8 +137,9 @@ create_tmp_file_with_lowercase_headers() {
 check_mandatory_headers() {
     local tmp_file=$1
     local headers_mandatory=("$@")
-    unset headers_mandatory[0]
-    local headers=$(head -1 "$tmp_file")
+    unset 'headers_mandatory[0]'
+    local headers
+    headers=$(head -1 "$tmp_file")
     for header in "${headers_mandatory[@]}"; do
         if ! echo "$headers" | grep -q "$header"; then
             echo -e "${red}header \"$header\" is missing in $tmp_file${whi}"
@@ -180,7 +184,7 @@ check_csv_columns_for_validity() {
     done
 
     # Find the indeces of the mandatory headers in the CSV data and store them in local_index_map
-    header=($(head -1 "$tmp_file" | tr ';' ' '))
+    read -ra header < <(head -1 "$tmp_file" | tr ';' ' ')
     for i in "${!header[@]}"; do
         trimmed_header=$(trim_special_chars "${header[$i]}")
         for idx in "${!headers_mandatory[@]}"; do
@@ -315,8 +319,10 @@ rm $tmp_fall $tmp_fab $tmp_icd $tmp_ops
 # Root values for the hashes are extracted from the aktin.properties file.
 # Hash algorithm is in accordance with the used DWH process.
 # Hashed values are append as the columns 'encounter_ide' and 'billing_ide'.
-readonly enc_root=$(grep "cda.encounter.root=*" "$path_aktin_properties" | awk -F'=' '{print $2}')
-readonly bill_root=$(grep "cda.billing.root=*" "$path_aktin_properties" | awk -F'=' '{print $2}')
+enc_root=$(grep "cda.encounter.root=*" "$path_aktin_properties" | awk -F'=' '{print $2}')
+readonly enc_root
+bill_root=$(grep "cda.billing.root=*" "$path_aktin_properties" | awk -F'=' '{print $2}')
+readonly bill_root
 awk -F';' -v enc_root="$enc_root" -v bill_root="$bill_root" '
     function calculate_hash(root, value) {
         cmd = "echo -n " root "/" value " | openssl sha1 -binary | base64"
@@ -350,7 +356,9 @@ sql_encounter="SELECT enc.encounter_ide FROM i2b2crcdata.encounter_mapping enc J
 sql_billing="SELECT obs.tval_char FROM i2b2crcdata.observation_fact obs JOIN i2b2crcdata.patient_mapping pat ON obs.patient_num = pat.patient_num LEFT JOIN i2b2crcdata.optinout_patients opt ON pat.patient_ide = opt.pat_psn WHERE (opt.study_id != 'AKTIN' OR opt.pat_psn IS NULL) AND obs.concept_cd = 'AKTIN:Fallkennzeichen';"
 sql_encouter_result_file="sql_result_encounter.txt"
 sql_billing_result_file="sql_result_billing.txt"
+# shellcheck disable=SC2024 # script runs as root, the redirect runs as root on purpose
 sudo -u postgres psql -d i2b2 -c "$sql_encounter" >"$sql_encouter_result_file"
+# shellcheck disable=SC2024 # script runs as root, the redirect runs as root on purpose
 sudo -u postgres psql -d i2b2 -c "$sql_billing" >"$sql_billing_result_file"
 awk -F';' -v OFS=';' -v sql_encounter_file="$sql_encouter_result_file" -v sql_billing_file="$sql_billing_result_file" '
     function trim(s) {

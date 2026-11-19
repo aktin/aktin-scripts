@@ -4,17 +4,17 @@
 # Version:      1.0
 # Author:       aivanets@ukaachen.de
 # Date:         18 Dec 25
-# Purpose:      Script checks import-summary if it has an error "connection has been closed". 
+# Purpose:      Script checks import-summary if it has an error "connection has been closed".
 # If so, sends an email to check this manually.
 #--------------------------------------
 
 set -euo pipefail
 
 for cmd in curl jq; do
-  command -v $cmd >/dev/null || {
-    echo "Error: $cmd is required but not installed." >&2
-    exit 1
-  }
+    command -v $cmd >/dev/null || {
+        echo "Error: $cmd is required but not installed." >&2
+        exit 1
+    }
 done
 
 # Email Settings (SMTP)
@@ -42,11 +42,11 @@ if [[ "$import_summary_errors" != *"error: This connection has been closed"* ]];
 
     # We use --fail to ensure curl exits with an error code if Auth fails
     if ! curl --fail --ssl-reqd \
-      --url "smtp://${SMTP_SERVER}:${SMTP_PORT}" \
-      --user "${SMTP_USER}:${SMTP_PASS}" \
-      --mail-from "$MAIL_FROM" \
-      "${MAIL_ARGS[@]}" \
-      --upload-file - <<EOF
+        --url "smtp://${SMTP_SERVER}:${SMTP_PORT}" \
+        --user "${SMTP_USER}:${SMTP_PASS}" \
+        --mail-from "$MAIL_FROM" \
+        "${MAIL_ARGS[@]}" \
+        --upload-file - <<EOF; then
 From: Aktin Monitoring <$MAIL_FROM>
 To: ${RECIPIENTS[*]}
 Subject: CRITICAL: Aktin DWH Connection Closed
@@ -54,7 +54,6 @@ Subject: CRITICAL: Aktin DWH Connection Closed
 The Aktin DWH import summary reported a connection failure.
 Error Details: $import_summary_errors
 EOF
-    then
         echo "ERROR: SMTP Authentication failed or Server unreachable. Stopping immediately."
         exit 1
     fi
