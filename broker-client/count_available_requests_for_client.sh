@@ -9,8 +9,8 @@
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 2 ]] && {
-  echo "Usage: $0 <broker_url> <client_api_key>"
-  exit 1
+    echo "Usage: $0 <broker_url> <client_api_key>"
+    exit 1
 }
 
 readonly broker_url=$1
@@ -20,4 +20,5 @@ readonly client_api_key=$2
 resp=$(curl -s --request GET "$broker_url/broker/my/request" --header "Authorization: Bearer $client_api_key")
 
 # count how often tag named "id" appears in response
+# shellcheck disable=SC2046 # unquoted on purpose so expr gets the bare count even if wc pads it
 expr $(echo $resp | grep -o "id" | wc -l)
