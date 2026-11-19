@@ -24,26 +24,29 @@ fi
 readonly tarfile="$1"
 
 # create log file
-readonly log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log
+log=apply_aktin_backup_$(date +%Y_%h_%d_%H%M).log
+readonly log
 
 # get wildfly home directory
 if [[ -d /opt/wildfly/ ]]; then
     readonly wildfly_home=/opt/wildfly
 elif [[ -n $(ls /opt/wildfly-*) ]]; then
-    readonly wildfly_home=/opt/wildfly-*
+    readonly wildfly_home="/opt/wildfly-*"
 fi
 
 extract_tarfile_and_get_folder_path() {
     local tar="$1"
     # create a temporary directory for extraction
-    local temp_dir=$(mktemp -d)
+    local temp_dir
+    temp_dir=$(mktemp -d)
     # extract the archive into the temporary directory
     tar -xf "$tar" -C "$temp_dir"
     # check if exactly one folder exists in the extracted content
-    local folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
+    local folder
+    folder=$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d)
     if [[ $(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d | wc -l) -ne 1 ]]; then
         echo "Error: Archive contains multiple folders or no folders"
-        rm -rf "$temp_dir"  # Clean up temp directory
+        rm -rf "$temp_dir" # Clean up temp directory
         return 1
     fi
     # return the path to the extracted folder
@@ -83,7 +86,7 @@ patch_aktin_properties() {
             value=${line1#*=}
             while read -r line2; do
                 if [[ ! $line2 = \#* && ! -z $line2 ]]; then
-                    if [[ ${line2%=*} == $key ]]; then
+                    if [[ ${line2%=*} == "$key" ]]; then
                         sed -i "s|${key}=.*|${key}=${value}|" /etc/aktin/aktin.properties
                         break
                     fi
@@ -152,6 +155,7 @@ restart_aktin_services() {
 }
 
 main() {
+    # shellcheck disable=SC2155 # an extraction failure is masked today, splitting would abort under set -e
     local backup_folder=$(extract_tarfile_and_get_folder_path $tarfile)
     install_aktin_packages
     stop_aktin_services
