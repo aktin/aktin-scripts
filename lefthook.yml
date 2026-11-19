@@ -1,0 +1,18 @@
+min_version: 2.0.5
+
+# All hooks come from the shared config in hooks/lefthook.yml.
+# Change git_url and ref to use another source or pin a version.
+remotes:
+  - git_url: https://github.com/aktin/aktin-github-scripts
+    ref: main
+    refetch_frequency: 24h
+    configs:
+      - hooks/lefthook.yml
+
+pre-commit:
+  scripts:
+    # The shared guard rejects data files outside its allowlist. The SQL files
+    # under sql/ are maintenance scripts, not data.
+    "block_data_files.py":
+      env:
+        DATA_FILE_ALLOWLIST: sql/
