@@ -16,3 +16,9 @@ pre-commit:
     "block_data_files.py":
       env:
         DATA_FILE_ALLOWLIST: sql/
+  commands:
+    # Formats staged shell scripts. Indentation comes from .editorconfig.
+    shfmt:
+      glob: "*.sh"
+      run: shfmt -w {staged_files}
+      stage_fixed: true
