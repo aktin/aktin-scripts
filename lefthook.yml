@@ -14,8 +14,7 @@ pre-commit:
     # The shared guard rejects data files outside its allowlist. The SQL files
     # under sql/ are maintenance scripts, not data.
     "block_data_files.py":
-      env:
-        DATA_FILE_ALLOWLIST: sql/
+      args: "--allow=sql/ {staged_files}"
   commands:
     # Formats staged shell scripts. Indentation comes from .editorconfig.
     shfmt:
