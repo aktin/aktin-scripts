@@ -29,8 +29,8 @@ function cleanup {
 trap cleanup EXIT
 
 function run_curl_command {
-    local xml_file=$1
-    curl -v -H "Content-Type: application/xml" -d "@${xml_file}" "http://$dwh_ip/aktin/cda/fhir/Binary/"
+  local xml_file=$1
+  curl -v -H "Content-Type: application/xml" -d "@${xml_file}" "http://$dwh_ip/aktin/cda/fhir/Binary/"
 }
 
 function process_folder {
@@ -49,4 +49,3 @@ else
   echo "Error: $input_path is not a valid zip file or folder."
   exit 1
 fi
-

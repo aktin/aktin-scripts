@@ -14,7 +14,7 @@ if [[ $# -lt 2 ]]; then
   exit 1
 fi
 
-if ! command -v xmllint &> /dev/null; then
+if ! command -v xmllint &>/dev/null; then
   echo "Error: libxml2-utils is required but not installed" >&2
   exit 1
 fi
@@ -32,7 +32,7 @@ CSV_FILE="$SCRIPT_DIR/cda_data_$current_datetime.csv"
 LOG_FILE="$SCRIPT_DIR/cda_log_$current_datetime.log"
 
 # enable global logging
-exec >> "$LOG_FILE" 2>&1
+exec >>"$LOG_FILE" 2>&1
 
 extract_roots_from_aktin_properties() {
   local aktin_properties="$1"
@@ -46,7 +46,7 @@ extract_roots_from_aktin_properties() {
 initialize_csv_file_if_nonexisting() {
   local csv_file="$1"
   if [ ! -f "$csv_file" ]; then
-    printf "encounter_id\tzipcode\tstreet_address\tbirth_date\tgender\tadmission_date\tdischarge_date\tdischarge_code\tcedis_code\tdiagnosis\tfile\n" > "$csv_file"
+    printf "encounter_id\tzipcode\tstreet_address\tbirth_date\tgender\tadmission_date\tdischarge_date\tdischarge_code\tcedis_code\tdiagnosis\tfile\n" >"$csv_file"
   fi
 }
 
@@ -78,8 +78,8 @@ parse_cda_file() {
   local filename=$(basename "$cda_file")
   local zipcode=$(get_xml_val "string(//*[local-name()='postalCode']/text())" "$cda_file")
   if ! is_postal_code_allowed "$zipcode"; then
-      echo "Skipping '$filename': ZIP '$zipcode' not allowed"
-      return
+    echo "Skipping '$filename': ZIP '$zipcode' not allowed"
+    return
   fi
   local encounter_id=$(get_xml_val "string(//*[local-name()='id'][@root='$encounter_root']/@extension)" "$cda_file")
   local street_address=$(get_xml_val "string(//*[local-name()='streetAddressLine']/text())" "$cda_file")
@@ -92,7 +92,7 @@ parse_cda_file() {
   # get all diagnosis fields
   local diagnosis=$(xmllint --xpath "//*[local-name()='value'][@codeSystem='1.2.276.0.76.5.424']/@code" "$cda_file" 2>/dev/null | grep -oP '(?<=code=")[^"]*' | paste -sd "," -)
   if [ -z "$diagnosis" ]; then diagnosis="NA"; fi
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$encounter_id" "$zipcode" "$street_address" "$birth_date" "$gender" "$admission_date" "$discharge_date" "$discharge_code" "$cedis_code" "$diagnosis" "$filename" >> "$CSV_FILE"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$encounter_id" "$zipcode" "$street_address" "$birth_date" "$gender" "$admission_date" "$discharge_date" "$discharge_code" "$cedis_code" "$diagnosis" "$filename" >>"$CSV_FILE"
 }
 
 process_all_cda_files_in_dir() {
