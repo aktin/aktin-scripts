@@ -117,6 +117,7 @@ echo "Reimporting encounter from $path"
 # for each XML file in a given directory, stores metadata in an array along with the file name
 patient_root=$(grep "^cda.patient.root.preset=" "/etc/aktin/aktin.properties" | cut -d '=' -f2)
 encounter_root=$(grep "^cda.encounter.root.preset=" "/etc/aktin/aktin.properties" | cut -d '=' -f2)
+# shellcheck disable=SC2034 # unused, the billing_id lookup below probably meant billing_root (left unchanged)
 billing_root=$(grep "^cda.billing.root.preset=" "/etc/aktin/aktin.properties" | cut -d '=' -f2)
 xml_files=("$path"/*.xml)
 declare -a import_log_list

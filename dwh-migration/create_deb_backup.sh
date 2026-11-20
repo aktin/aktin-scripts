@@ -16,14 +16,15 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # create timestamp and log file
-readonly current=$(date +%Y_%h_%d_%H%M)
+current=$(date +%Y_%h_%d_%H%M)
+readonly current
 readonly log=create_aktin_backup_$current.log
 
 # get wildfly home directory
 if [[ -d /opt/wildfly/ ]]; then
     readonly wildfly_home=/opt/wildfly
 elif [[ -n $(ls /opt/wildfly-*) ]]; then
-    readonly wildfly_home=/opt/wildfly-*
+    readonly wildfly_home="/opt/wildfly-*"
 fi
 
 create_dir() {
@@ -36,7 +37,7 @@ remove_dir() {
     rm -rf $1
 }
 
-tar_dir()  {
+tar_dir() {
     tar -czf aktin_backup_$current.tar.gz --absolute-names --warning=no-file-changed $1/*
 }
 
@@ -58,19 +59,22 @@ backup_aktin() {
     local db=$1
     local destination=$2
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db --clean > "$destination"
+    # shellcheck disable=SC2024 # the redirect runs as root on purpose, postgres only runs pg_dump
+    sudo -u postgres pg_dump $db --clean >"$destination"
 }
 
 backup_i2b2() {
     local db="i2b2"
     local destination=$1
     echo -e "backing up $db"
-    sudo -u postgres pg_dump $db --clean > "$destination"
+    # shellcheck disable=SC2024 # the redirect runs as root on purpose, postgres only runs pg_dump
+    sudo -u postgres pg_dump $db --clean >"$destination"
 }
 
 main() {
-    local tmp_dir=$(create_dir "backup_$current")
-	
+    local tmp_dir
+    tmp_dir=$(create_dir "backup_$current")
+
     backup_file "/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
     backup_file "$wildfly_home/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
     backup_file "$wildfly_home/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"

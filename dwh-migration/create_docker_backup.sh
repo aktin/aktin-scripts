@@ -23,21 +23,21 @@ readonly wildfly_container="$1"
 readonly postgres_container="$2"
 
 # create timestamp and log file
-readonly current="$(date +%Y_%h_%d_%H%M)"
+current="$(date +%Y_%h_%d_%H%M)"
+readonly current
 readonly log=create_aktin_backup_$current.log
-
 
 # Fail fast if a required container isn't running
 check_container_running() {
-  local container_name="$1"
+    local container_name="$1"
 
-  if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
-      echo "Container '$container_name' is running."
-  else
-      echo "Container '$container_name' is NOT running."
-      echo "Terminating process"
-      exit 1
-  fi
+    if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        echo "Container '$container_name' is running."
+    else
+        echo "Container '$container_name' is NOT running."
+        echo "Terminating process"
+        exit 1
+    fi
 }
 
 # Copy a file/dir from container to host staging area
@@ -60,36 +60,36 @@ backup_database() {
     local destination="$2"
 
     echo -e "create backup of database $db"
-    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" > "$destination"
+    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" >"$destination"
 }
 
 # compresses the backup files into the final tar.gz archive
-tar_dir()  {
+tar_dir() {
     tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
 }
 
-
 main() {
-  check_container_running "$wildfly_container"
-  check_container_running "$postgres_container"
+    check_container_running "$wildfly_container"
+    check_container_running "$postgres_container"
 
-  # create backup dir and fill with backup files
-  local tmp_dir=$(create_dir "backup_$current")
-  # backup configuration files from container
-  backup_docker_resource "$wildfly_container:/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
-  backup_docker_resource "$wildfly_container:/opt/wildfly/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
-  backup_docker_resource "$wildfly_container:/opt/wildfly/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
+    # create backup dir and fill with backup files
+    local tmp_dir
+    tmp_dir=$(create_dir "backup_$current")
+    # backup configuration files from container
+    backup_docker_resource "$wildfly_container:/etc/aktin/aktin.properties" "$tmp_dir/backup_aktin.properties"
+    backup_docker_resource "$wildfly_container:/opt/wildfly/standalone/configuration/standalone.xml" "$tmp_dir/backup_standalone.xml"
+    backup_docker_resource "$wildfly_container:/opt/wildfly/bin/standalone.conf" "$tmp_dir/backup_standalone.conf"
 
-  create_dir "$tmp_dir/var/lib/"
-  backup_docker_resource "$wildfly_container:/var/lib/aktin" "$tmp_dir/var/lib"
+    create_dir "$tmp_dir/var/lib/"
+    backup_docker_resource "$wildfly_container:/var/lib/aktin" "$tmp_dir/var/lib"
 
-  backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
-  backup_database "aktin" "$tmp_dir/backup_aktin.sql"
+    backup_database "i2b2" "$tmp_dir/backup_i2b2.sql"
+    backup_database "aktin" "$tmp_dir/backup_aktin.sql"
 
-  # create final compressed backup file
-  tar_dir "$tmp_dir"
-  rm -rf "$tmp_dir"
-  echo "backup completed"
+    # create final compressed backup file
+    tar_dir "$tmp_dir"
+    rm -rf "$tmp_dir"
+    echo "backup completed"
 }
 
 main | tee -a "$log"
