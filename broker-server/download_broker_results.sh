@@ -11,8 +11,8 @@ set -euo pipefail
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 4 ]] && {
-    echo "Usage: $0 <broker_url> <admin_api_key> <start_id> <end_id>"
-    exit 1
+  echo "Usage: $0 <broker_url> <admin_api_key> <start_id> <end_id>"
+  exit 1
 }
 
 readonly broker_url="$1/broker"
@@ -29,17 +29,17 @@ mapfile -t request_ids < <(grep -Po '<request id="\K[^"]+' <<<"${requests}")
 readonly request_ids
 
 download_request_result() {
-    local request_id=$1
-    # order the broker to create a downloadable export with a uuid for the specified request
-    # shellcheck disable=SC2155 # masking the curl exit code is current behavior, splitting would abort under set -e
-    local uuid=$(curl -s --request POST "$broker_url/export/request-bundle/$request_id" --header "Authorization: Bearer $admin_api_key")
-    # download the result bundle using the generated uuid
-    curl -s --request GET "$broker_url/download/$uuid" --header "Authorization: Bearer $admin_api_key" -o "$request_id.zip"
+  local request_id=$1
+  # order the broker to create a downloadable export with a uuid for the specified request
+  # shellcheck disable=SC2155 # masking the curl exit code is current behavior, splitting would abort under set -e
+  local uuid=$(curl -s --request POST "$broker_url/export/request-bundle/$request_id" --header "Authorization: Bearer $admin_api_key")
+  # download the result bundle using the generated uuid
+  curl -s --request GET "$broker_url/download/$uuid" --header "Authorization: Bearer $admin_api_key" -o "$request_id.zip"
 }
 
 # iterate and download request status within the specified id range
 for request_id in "${request_ids[@]}"; do
-    if [[ $request_id -ge $request_id_start && $request_id -le $request_id_end ]]; then
-        download_request_result "$request_id"
-    fi
+  if [[ $request_id -ge $request_id_start && $request_id -le $request_id_end ]]; then
+    download_request_result "$request_id"
+  fi
 done

@@ -11,10 +11,10 @@
 set -euo pipefail
 
 for cmd in curl jq; do
-    command -v $cmd >/dev/null || {
-        echo "Error: $cmd is required but not installed." >&2
-        exit 1
-    }
+  command -v $cmd >/dev/null || {
+    echo "Error: $cmd is required but not installed." >&2
+    exit 1
+  }
 done
 
 # Email Settings (SMTP)
@@ -32,21 +32,21 @@ result=$(curl -s -k "$IMPORT_ENDPOINT")
 import_summary_errors=$(echo "$result" | jq -r '.error | join(", ")' || echo "")
 
 if [[ "$import_summary_errors" != *"error: This connection has been closed"* ]]; then
-    echo "Connection error found. Sending bulk alert..."
+  echo "Connection error found. Sending bulk alert..."
 
-    # Prepare recipient arguments for curl
-    MAIL_ARGS=()
-    for rec in "${RECIPIENTS[@]}"; do
-        MAIL_ARGS+=("--mail-rcpt" "$rec")
-    done
+  # Prepare recipient arguments for curl
+  MAIL_ARGS=()
+  for rec in "${RECIPIENTS[@]}"; do
+    MAIL_ARGS+=("--mail-rcpt" "$rec")
+  done
 
-    # We use --fail to ensure curl exits with an error code if Auth fails
-    if ! curl --fail --ssl-reqd \
-        --url "smtp://${SMTP_SERVER}:${SMTP_PORT}" \
-        --user "${SMTP_USER}:${SMTP_PASS}" \
-        --mail-from "$MAIL_FROM" \
-        "${MAIL_ARGS[@]}" \
-        --upload-file - <<EOF; then
+  # We use --fail to ensure curl exits with an error code if Auth fails
+  if ! curl --fail --ssl-reqd \
+    --url "smtp://${SMTP_SERVER}:${SMTP_PORT}" \
+    --user "${SMTP_USER}:${SMTP_PASS}" \
+    --mail-from "$MAIL_FROM" \
+    "${MAIL_ARGS[@]}" \
+    --upload-file - <<EOF; then
 From: Aktin Monitoring <$MAIL_FROM>
 To: ${RECIPIENTS[*]}
 Subject: CRITICAL: Aktin DWH Connection Closed
@@ -54,7 +54,7 @@ Subject: CRITICAL: Aktin DWH Connection Closed
 The Aktin DWH import summary reported a connection failure.
 Error Details: $import_summary_errors
 EOF
-        echo "ERROR: SMTP Authentication failed or Server unreachable. Stopping immediately."
-        exit 1
-    fi
+    echo "ERROR: SMTP Authentication failed or Server unreachable. Stopping immediately."
+    exit 1
+  fi
 fi

@@ -31,23 +31,23 @@ readonly output_merged="merged_encounter_$current_date.csv"
 
 # Check if the script is being run as the root user (EUID 0)
 if [[ $EUID -ne 0 ]]; then
-    echo -e "${red}script must be executed as root!${whi}"
-    exit 1
+  echo -e "${red}script must be executed as root!${whi}"
+  exit 1
 fi
 # Check if the path to p21.zip is provided and if the file exists.
 readonly path_p21_zip="${1}"
 if [[ -z "$path_p21_zip" ]]; then
-    echo -e "${red}path to p21.zip is missing.${whi}"
-    exit 1
+  echo -e "${red}path to p21.zip is missing.${whi}"
+  exit 1
 elif [[ ! -f "$path_p21_zip" ]]; then
-    echo -e "${red}file \"$path_p21_zip\" does not exist.${whi}"
-    exit 1
+  echo -e "${red}file \"$path_p21_zip\" does not exist.${whi}"
+  exit 1
 fi
 # Check if the aktin.properties file exists at the given path.
 readonly path_aktin_properties=${2:-"/etc/aktin/aktin.properties"}
 if [[ ! -f $path_aktin_properties ]]; then
-    echo -e "${red}aktin.properties does not exist at the given path!${whi}"
-    exit 1
+  echo -e "${red}aktin.properties does not exist at the given path!${whi}"
+  exit 1
 fi
 
 # Create a temporary directory to unzip files and perform file operations.
@@ -60,20 +60,20 @@ unzip -q "$path_p21_zip" -d "$tmp_dir"
 find "$tmp_dir" -type f -exec sh -c 'mv "$0" "${0%/*}/$(basename "${0}" | tr "[:upper:]" "[:lower:]")"' {} \;
 # shellcheck disable=SC2045 # file names come from the p21 zip, kept as is to preserve behavior
 for file in $(ls "$tmp_dir"); do
-    case "$file" in
-    "fall.csv")
-        readonly path_fall="$tmp_dir/$file"
-        ;;
-    "fab.csv")
-        readonly path_fab="$tmp_dir/$file"
-        ;;
-    "icd.csv")
-        readonly path_icd="$tmp_dir/$file"
-        ;;
-    "ops.csv")
-        readonly path_ops="$tmp_dir/$file"
-        ;;
-    esac
+  case "$file" in
+  "fall.csv")
+    readonly path_fall="$tmp_dir/$file"
+    ;;
+  "fab.csv")
+    readonly path_fab="$tmp_dir/$file"
+    ;;
+  "icd.csv")
+    readonly path_icd="$tmp_dir/$file"
+    ;;
+  "ops.csv")
+    readonly path_ops="$tmp_dir/$file"
+    ;;
+  esac
 done
 
 # This function checks the existence of a given file and creates an output file if the input file exists.
@@ -87,23 +87,23 @@ done
 # Returns:
 # - No return value. The function exits with a code of 1 if the mandatory file does not exist.
 check_and_touch_file() {
-    local filename=$1
-    local path_csv=$2
-    local path_output=$3
-    local is_mandatory=$4
-    if [ -z "$path_csv" ]; then
-        if [ "$is_mandatory" == "true" ]; then
-            echo -e "${red}path to $filename is missing${whi}"
-            exit 1
-        else
-            echo -e "${ora}path to $filename not provided${whi}"
-        fi
-    elif [ ! -f $path_csv ]; then
-        echo -e "${red}file \"$path_csv\" does not exist${whi}"
-        exit 1
+  local filename=$1
+  local path_csv=$2
+  local path_output=$3
+  local is_mandatory=$4
+  if [ -z "$path_csv" ]; then
+    if [ "$is_mandatory" == "true" ]; then
+      echo -e "${red}path to $filename is missing${whi}"
+      exit 1
     else
-        touch $path_output
+      echo -e "${ora}path to $filename not provided${whi}"
     fi
+  elif [ ! -f $path_csv ]; then
+    echo -e "${red}file \"$path_csv\" does not exist${whi}"
+    exit 1
+  else
+    touch $path_output
+  fi
 }
 
 check_and_touch_file "fall.csv" "$path_fall" "$output_fall" "true"
@@ -120,10 +120,10 @@ check_and_touch_file "ops.csv" "$path_ops" "$output_ops" "false"
 # Returns:
 # - No return value. A new file with lowercase headers is created at the location specified by tmp_file.
 create_tmp_file_with_lowercase_headers() {
-    local src_file=$1
-    local tmp_file=$2
-    head -1 "$src_file" | tr "[:upper:]" "[:lower:]" | tr -d ' ' | tr -d '-' >"$tmp_file"
-    tail -n +2 "$src_file" >>"$tmp_file"
+  local src_file=$1
+  local tmp_file=$2
+  head -1 "$src_file" | tr "[:upper:]" "[:lower:]" | tr -d ' ' | tr -d '-' >"$tmp_file"
+  tail -n +2 "$src_file" >>"$tmp_file"
 }
 
 # This function checks that a CSV file contains all mandatory headers.
@@ -135,17 +135,17 @@ create_tmp_file_with_lowercase_headers() {
 # Returns:
 # - No return value. The function exits with a code of 1 if any mandatory header is missing.
 check_mandatory_headers() {
-    local tmp_file=$1
-    local headers_mandatory=("$@")
-    unset 'headers_mandatory[0]'
-    local headers
-    headers=$(head -1 "$tmp_file")
-    for header in "${headers_mandatory[@]}"; do
-        if ! echo "$headers" | grep -q "$header"; then
-            echo -e "${red}header \"$header\" is missing in $tmp_file${whi}"
-            exit 1
-        fi
-    done
+  local tmp_file=$1
+  local headers_mandatory=("$@")
+  unset 'headers_mandatory[0]'
+  local headers
+  headers=$(head -1 "$tmp_file")
+  for header in "${headers_mandatory[@]}"; do
+    if ! echo "$headers" | grep -q "$header"; then
+      echo -e "${red}header \"$header\" is missing in $tmp_file${whi}"
+      exit 1
+    fi
+  done
 }
 
 # This function trims special characters from a given string.
@@ -156,7 +156,7 @@ check_mandatory_headers() {
 # Returns:
 # - The trimmed string.
 trim_special_chars() {
-    echo "$1" | sed 's/[^a-zA-Z0-9]*//g'
+  echo "$1" | sed 's/[^a-zA-Z0-9]*//g'
 }
 
 # This function checks the validity of CSV columns based on given regex patterns.
@@ -170,68 +170,68 @@ trim_special_chars() {
 # Returns:
 #   - No return value. A new file containing the valid data is created at the location specified by output_file.
 check_csv_columns_for_validity() {
-    local tmp_file="$1"
-    local output_file="$2"
-    local -a headers_mandatory
-    IFS=' ' read -ra headers_mandatory <<<"$3"
-    local -a regex_patterns
-    IFS=';' read -ra regex_patterns <<<"$4"
+  local tmp_file="$1"
+  local output_file="$2"
+  local -a headers_mandatory
+  IFS=' ' read -ra headers_mandatory <<<"$3"
+  local -a regex_patterns
+  IFS=';' read -ra regex_patterns <<<"$4"
 
-    # Initialize local_index_map with empty strings
-    declare -a local_index_map
-    for header in "${headers_mandatory[@]}"; do
-        local_index_map+=("")
+  # Initialize local_index_map with empty strings
+  declare -a local_index_map
+  for header in "${headers_mandatory[@]}"; do
+    local_index_map+=("")
+  done
+
+  # Find the indeces of the mandatory headers in the CSV data and store them in local_index_map
+  read -ra header < <(head -1 "$tmp_file" | tr ';' ' ')
+  for i in "${!header[@]}"; do
+    trimmed_header=$(trim_special_chars "${header[$i]}")
+    for idx in "${!headers_mandatory[@]}"; do
+      if [[ "$trimmed_header" == "${headers_mandatory[$idx]}" ]]; then
+        local_index_map[$idx]=$i
+      fi
+    done
+  done
+
+  # Write the mandatory headers to the output_file
+  echo "$(
+    IFS=';'
+    echo "${headers_mandatory[*]}"
+  )" >"$output_file"
+
+  # Start processing file line by line
+  while IFS= read -r line; do
+    IFS=';' read -ra values <<<"$line"
+    output_line=""
+    flag_invalid=0
+
+    # Iterate through the mandatory headers and check the values for the given regex pattern
+    # Store the values of the mandatory columns in a new CSV file
+    # Mark invalid values with !!
+    for idx in "${!headers_mandatory[@]}"; do
+      original_val="${values[${local_index_map[$idx]}]}"
+      val=$(trim_special_chars "$original_val")
+      regex="${regex_patterns[$idx]}"
+      if [[ ! $val =~ $regex ]]; then
+        flag_invalid=1
+        val="!!$val"
+      fi
+      output_line="$output_line$val;"
     done
 
-    # Find the indeces of the mandatory headers in the CSV data and store them in local_index_map
-    read -ra header < <(head -1 "$tmp_file" | tr ';' ' ')
-    for i in "${!header[@]}"; do
-        trimmed_header=$(trim_special_chars "${header[$i]}")
-        for idx in "${!headers_mandatory[@]}"; do
-            if [[ "$trimmed_header" == "${headers_mandatory[$idx]}" ]]; then
-                local_index_map[$idx]=$i
-            fi
-        done
-    done
-
-    # Write the mandatory headers to the output_file
-    echo "$(
+    # Mark khinterneskennzeichen with !! if any value was invalid
+    if [[ $flag_invalid -eq 1 ]]; then
+      IFS=';' read -ra output_values <<<"$output_line"
+      output_values[0]="!!${output_values[0]}"
+      output_line=$(
         IFS=';'
-        echo "${headers_mandatory[*]}"
-    )" >"$output_file"
+        echo "${output_values[*]}"
+      )
+    fi
 
-    # Start processing file line by line
-    while IFS= read -r line; do
-        IFS=';' read -ra values <<<"$line"
-        output_line=""
-        flag_invalid=0
-
-        # Iterate through the mandatory headers and check the values for the given regex pattern
-        # Store the values of the mandatory columns in a new CSV file
-        # Mark invalid values with !!
-        for idx in "${!headers_mandatory[@]}"; do
-            original_val="${values[${local_index_map[$idx]}]}"
-            val=$(trim_special_chars "$original_val")
-            regex="${regex_patterns[$idx]}"
-            if [[ ! $val =~ $regex ]]; then
-                flag_invalid=1
-                val="!!$val"
-            fi
-            output_line="$output_line$val;"
-        done
-
-        # Mark khinterneskennzeichen with !! if any value was invalid
-        if [[ $flag_invalid -eq 1 ]]; then
-            IFS=';' read -ra output_values <<<"$output_line"
-            output_values[0]="!!${output_values[0]}"
-            output_line=$(
-                IFS=';'
-                echo "${output_values[*]}"
-            )
-        fi
-
-        echo "$output_line" >>"$output_file"
-    done < <(tail -n +2 "$tmp_file")
+    echo "$output_line" >>"$output_file"
+  done < <(tail -n +2 "$tmp_file")
 }
 
 readonly tmp_fall="temp_fall.csv"
@@ -245,27 +245,27 @@ readonly tmp_fab="temp_fab.csv"
 declare -a fab_headers_mandatory=("khinterneskennzeichen" "fachabteilung" "fabaufnahmedatum" "kennungintensivbett")
 readonly fab_regex_patterns="^.*$;^(HA|BA|BE)[0-9]{4}$;^[0-9]{12}$;^(J|N)$"
 if [ -n "$path_fab" ]; then
-    create_tmp_file_with_lowercase_headers "$path_fab" "$tmp_fab"
-    check_mandatory_headers "$tmp_fab" "${fab_headers_mandatory[@]}"
-    check_csv_columns_for_validity "$tmp_fab" "$output_fab" "${fab_headers_mandatory[*]}" "$fab_regex_patterns"
+  create_tmp_file_with_lowercase_headers "$path_fab" "$tmp_fab"
+  check_mandatory_headers "$tmp_fab" "${fab_headers_mandatory[@]}"
+  check_csv_columns_for_validity "$tmp_fab" "$output_fab" "${fab_headers_mandatory[*]}" "$fab_regex_patterns"
 fi
 
 readonly tmp_icd="temp_icd.csv"
 declare -a icd_headers_mandatory=("khinterneskennzeichen" "diagnoseart" "icdversion" "icdkode")
 readonly icd_regex_patterns="^.*$;^(HD|ND|SD)$;^20[0-9]{2}$;^[A-Z][0-9]{2}(\.)?.{0,5}$"
 if [ -n "$path_icd" ]; then
-    create_tmp_file_with_lowercase_headers "$path_icd" "$tmp_icd"
-    check_mandatory_headers "$tmp_icd" "${icd_headers_mandatory[@]}"
-    check_csv_columns_for_validity "$tmp_icd" "$output_icd" "${icd_headers_mandatory[*]}" "$icd_regex_patterns"
+  create_tmp_file_with_lowercase_headers "$path_icd" "$tmp_icd"
+  check_mandatory_headers "$tmp_icd" "${icd_headers_mandatory[@]}"
+  check_csv_columns_for_validity "$tmp_icd" "$output_icd" "${icd_headers_mandatory[*]}" "$icd_regex_patterns"
 fi
 
 readonly tmp_ops="temp_ops.csv"
 declare -a ops_headers_mandatory=("khinterneskennzeichen" "opsversion" "opskode" "opsdatum")
 readonly ops_regex_patterns="^.*$;^20[0-9]{2}$;^[0-9]{1}(\-)?[0-9]{2}(.{1})?(\.)?.{0,3}$;^[0-9]{12}$"
 if [ -n "$path_ops" ]; then
-    create_tmp_file_with_lowercase_headers "$path_ops" "$tmp_ops"
-    check_mandatory_headers "$tmp_ops" "${ops_headers_mandatory[@]}"
-    check_csv_columns_for_validity "$tmp_ops" "$output_ops" "${ops_headers_mandatory[*]}" "$ops_regex_patterns"
+  create_tmp_file_with_lowercase_headers "$path_ops" "$tmp_ops"
+  check_mandatory_headers "$tmp_ops" "${ops_headers_mandatory[@]}"
+  check_csv_columns_for_validity "$tmp_ops" "$output_ops" "${ops_headers_mandatory[*]}" "$ops_regex_patterns"
 fi
 
 # This function extracts the ID column values from a CSV file and stores them in a new file.
@@ -277,13 +277,13 @@ fi
 # Returns:
 # - No return value. A new file containing the IDs is created at the location specified by output_file.
 function extract_ids {
-    local input_file=$1
-    local output_file=$2
-    if [[ -f $input_file ]]; then
-        awk -F';' 'NR>1 {print $1}' "$input_file" >"$output_file"
-    else
-        touch "$output_file"
-    fi
+  local input_file=$1
+  local output_file=$2
+  if [[ -f $input_file ]]; then
+    awk -F';' 'NR>1 {print $1}' "$input_file" >"$output_file"
+  else
+    touch "$output_file"
+  fi
 }
 
 extract_ids $output_fall $tmp_fall
@@ -297,21 +297,21 @@ extract_ids $output_ops $tmp_ops
 # The merged data is sorted by the first column (fall) in ascending order and saved to the final merged output file.
 # Temporary files are removed after processing.
 if [[ -s $tmp_fab ]] || [[ -s $tmp_icd ]] || [[ -s $tmp_ops ]]; then
-    echo "fall;fab;icd;ops" >$output_merged
-    while IFS= read -r line; do
-        fall_value=$line
-        fab_value=$(grep -w -m 1 "$line" $tmp_fab)
-        icd_value=$(grep -w -m 1 "$line" $tmp_icd)
-        ops_value=$(grep -w -m 1 "$line" $tmp_ops)
-        echo "$fall_value;$fab_value;$icd_value;$ops_value" >>$output_merged
-    done <$tmp_fall
-    {
-        echo "fall;fab;icd;ops"
-        tail -n +2 $output_merged | sort -t';' -k1,1n
-    } >sorted_$output_merged
-    mv sorted_$output_merged $output_merged
+  echo "fall;fab;icd;ops" >$output_merged
+  while IFS= read -r line; do
+    fall_value=$line
+    fab_value=$(grep -w -m 1 "$line" $tmp_fab)
+    icd_value=$(grep -w -m 1 "$line" $tmp_icd)
+    ops_value=$(grep -w -m 1 "$line" $tmp_ops)
+    echo "$fall_value;$fab_value;$icd_value;$ops_value" >>$output_merged
+  done <$tmp_fall
+  {
+    echo "fall;fab;icd;ops"
+    tail -n +2 $output_merged | sort -t';' -k1,1n
+  } >sorted_$output_merged
+  mv sorted_$output_merged $output_merged
 else
-    cp $output_fall $output_merged
+  cp $output_fall $output_merged
 fi
 rm $tmp_fall $tmp_fab $tmp_icd $tmp_ops
 

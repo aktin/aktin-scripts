@@ -9,8 +9,8 @@
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 3 ]] && {
-    echo "Usage: $0 <broker_url> <client_api_key> <request_id>"
-    exit 1
+  echo "Usage: $0 <broker_url> <client_api_key> <request_id>"
+  exit 1
 }
 
 readonly broker_url=$1

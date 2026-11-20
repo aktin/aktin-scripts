@@ -12,8 +12,8 @@ set -euo pipefail
 
 # ensure the correct number of arguments is provided
 [[ $# -ne 3 ]] && {
-    echo "Usage: $0 <dwh_ip> <server_user> <ear_path>"
-    exit 1
+  echo "Usage: $0 <dwh_ip> <server_user> <ear_path>"
+  exit 1
 }
 
 readonly dwh_ip=$1
