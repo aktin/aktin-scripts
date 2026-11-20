@@ -8,8 +8,11 @@
 #--------------------------------------
 set -euo pipefail
 
-die() { echo "ERROR: $*" >&2; exit 1; }
-note() { echo "==> $*" >&2; }   # status messages to stderr
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+note() { echo "==> $*" >&2; } # status messages to stderr
 
 check_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -32,18 +35,24 @@ check_date_order() {
   local s e
   s=$(date -d "${start:0:4}-${start:4:2}-${start:6:2}" +%s) || return 1
   e=$(date -d "${end:0:4}-${end:4:2}-${end:6:2}" +%s) || return 1
-  (( s <= e ))
+  ((s <= e))
 }
 
 # Displaying running containers. DWH containers encode the DWH instance in its name
 select_instance_prefix() {
   local running
   running=$(docker ps --format '{{.Names}}' || true)
-  [[ -n "$running" ]] || { echo "No running containers found." >&2; return 1; }
+  [[ -n "$running" ]] || {
+    echo "No running containers found." >&2
+    return 1
+  }
 
   local -a prefixes
   mapfile -t prefixes < <(printf "%s\n" "$running" | awk -F'-' '{print $1}' | sort -u)
-  ((${#prefixes[@]})) || { echo "No prefixes could be derived." >&2; return 1; }
+  ((${#prefixes[@]})) || {
+    echo "No prefixes could be derived." >&2
+    return 1
+  }
 
   # Use fd 3 for the actual return value; send all UI noise to stderr.
   exec 3>&1
@@ -53,7 +62,7 @@ select_instance_prefix() {
     local p
     select p in "${prefixes[@]}"; do
       if [[ -n "${p:-}" ]]; then
-        printf "%s\n" "$p" >&3   # ONLY this goes to captured stdout
+        printf "%s\n" "$p" >&3 # ONLY this goes to captured stdout
         return 0
       fi
       echo "Invalid choice. Try again."
@@ -78,15 +87,18 @@ get_container_id() {
 wait_until_stopped() {
   local name="$1" timeout="${2:-60}" t=0
   while service_running "$name"; do
-    (( t >= timeout )) && { echo "Timed out waiting for $name to stop." >&2; return 1; }
+    ((t >= timeout)) && {
+      echo "Timed out waiting for $name to stop." >&2
+      return 1
+    }
     sleep 1
     ((t++))
   done
 }
 
 execute_sql() {
-  local start_date="$1"  # yyyymmdd
-  local end_date="$2"    # yyyymmdd
+  local start_date="$1" # yyyymmdd
+  local end_date="$2"   # yyyymmdd
   local container="$3"
 
   docker exec "$container" psql -U postgres -d i2b2 -v ON_ERROR_STOP=1 -c "
@@ -112,7 +124,7 @@ main() {
 
   local start_date="$1" end_date="$2"
   validate_date "$start_date" || die "Invalid start date"
-  validate_date "$end_date"   || die "Invalid end date"
+  validate_date "$end_date" || die "Invalid end date"
   check_date_order "$start_date" "$end_date" || die "Start date must be <= end date"
 
   note "Start Date: $start_date and End Date: $end_date are valid."
@@ -144,7 +156,7 @@ main() {
   execute_sql "$start_date" "$end_date" "$postgres"
   note "SQL execution finished."
 
-  if (( wildfly_was_running == 1 )); then
+  if ((wildfly_was_running == 1)); then
     note "Restarting WildFly service…"
     docker start "$wildfly" >/dev/null
     note "WildFly restarted."
