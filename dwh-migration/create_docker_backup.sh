@@ -10,13 +10,13 @@
 
 # Require root to avoid permission errors
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
+  echo "Please run as root"
+  exit 1
 fi
 
 [[ $# -ne 2 ]] && {
-    echo "Usage: $0 <wildfly_container_name> <postgres_container_name>"
-    exit 1
+  echo "Usage: $0 <wildfly_container_name> <postgres_container_name>"
+  exit 1
 }
 
 readonly wildfly_container="$1"
@@ -26,48 +26,46 @@ readonly postgres_container="$2"
 readonly current="$(date +%Y_%h_%d_%H%M)"
 readonly log=create_aktin_backup_$current.log
 
-
 # Fail fast if a required container isn't running
 check_container_running() {
   local container_name="$1"
 
   if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
-      echo "Container '$container_name' is running."
+    echo "Container '$container_name' is running."
   else
-      echo "Container '$container_name' is NOT running."
-      echo "Terminating process"
-      exit 1
+    echo "Container '$container_name' is NOT running."
+    echo "Terminating process"
+    exit 1
   fi
 }
 
 # Copy a file/dir from container to host staging area
 backup_docker_resource() {
-    local resource="$1"
-    local destination="$2"
-    echo -e "backing up $resource"
-    docker cp "$resource" "$destination"
+  local resource="$1"
+  local destination="$2"
+  echo -e "backing up $resource"
+  docker cp "$resource" "$destination"
 }
 
 create_dir() {
-    local dir=$1
-    mkdir -p "$dir"
-    echo "$dir"
+  local dir=$1
+  mkdir -p "$dir"
+  echo "$dir"
 }
 
 # Dump a PostgreSQL database from inside the container to a host file
 backup_database() {
-    local db="$1"
-    local destination="$2"
+  local db="$1"
+  local destination="$2"
 
-    echo -e "create backup of database $db"
-    docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" > "$destination"
+  echo -e "create backup of database $db"
+  docker exec -u postgres "$postgres_container" pg_dump -U postgres "$db" >"$destination"
 }
 
 # compresses the backup files into the final tar.gz archive
-tar_dir()  {
-    tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
+tar_dir() {
+  tar -czf aktin_backup_"$current".tar.gz --absolute-names --warning=no-file-changed "$1"/*
 }
-
 
 main() {
   check_container_running "$wildfly_container"
