@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------
 # Script: apply_backup_to_docker.sh
-# Version: 1.0
+# Version: 1.1
 # Author:  whoy@ukaachen.de
-# Date:    2025-06-04
+# Date:    28 OKT 26
 # Purpose: Restore i2b2/aktin DBs from a given tar.gz into the target DWH
 #          Docker stack (PostgreSQL + WildFly + Apache HTTPD).
 #--------------------------------------
@@ -112,6 +112,19 @@ remove_dir() {
     rm -rf "$1"
 }
 
+# Drop a database and create it again empty, keeping its owner.
+# Ensures the restored database is an exact copy of the backup, without objects only the target had
+recreate_database() {
+    local db=$1                 # Database name
+    local container=$2          # PostgreSQL container name
+    local owner
+    owner=$(sudo docker exec "$container" psql -U postgres -tA -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$db';")
+
+    echo "recreating empty database $db (owner: $owner)"
+    sudo docker exec "$container" psql -U postgres -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$db\";"
+    sudo docker exec "$container" psql -U postgres -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\" OWNER \"$owner\" TEMPLATE template0;"
+}
+
 # Restore DBs from SQL dumps, preserving pm_cell_data then reapplying it
 restore_databases() {
     local backup_folder=$1      # Host path to extracted backup folder
@@ -122,15 +135,18 @@ restore_databases() {
     sudo docker exec -it "$container" sh -c "pg_dump -U postgres -t i2b2pm.pm_cell_data i2b2 --data-only > $path_to_pmcell_backup"
     host_tmp_paths+=("$path_to_pmcell_backup")
 
+    recreate_database "i2b2" "$container"
+    recreate_database "aktin" "$container"
+
     echo "importing the backup of aktin and i2b2 databases"
-    # Import i2b2 and aktin from host-side SQL dumps
-    sudo docker exec -i "$container" psql -U postgres -q -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null 2>&1
-    sudo docker exec -i "$container" psql -U postgres -q -d aktin < "$backup_folder/backup_aktin.sql" > /dev/null 2>&1
+    # Import i2b2 and aktin from host-side SQL dumps into the freshly recreated databases
+    sudo docker exec -i "$container" psql -U postgres -q -v ON_ERROR_STOP=1 -d i2b2 < "$backup_folder/backup_i2b2.sql" > /dev/null
+    sudo docker exec -i "$container" psql -U postgres -q -v ON_ERROR_STOP=1 -d aktin < "$backup_folder/backup_aktin.sql" > /dev/null
 
     # Reapply pm_cell_data
     echo "importing pm cells"
-    sudo docker exec "$container" psql -U postgres -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null 2>&1
-    sudo docker exec "$container" psql -U postgres -d i2b2 -q -f "$path_to_pmcell_backup"
+    sudo docker exec "$container" psql -U postgres -d i2b2 -c "TRUNCATE Table i2b2pm.pm_cell_data;" > /dev/null
+    sudo docker exec "$container" psql -U postgres -d i2b2 -q -v ON_ERROR_STOP=1 -f "$path_to_pmcell_backup"
 }
 
 # Copy a config file (host → container target path)
@@ -140,6 +156,17 @@ copy_config_into_container() {
 
   echo "importing config from: $src_path to: $target_path"
   sudo docker cp "$src_path" "$target_path"
+}
+
+# Merge /var/lib/aktin payload into the container and fix ownership.
+# Drop import-scripts first to safely ignore it during merge
+merge_aktin_lib_dir() {
+    local backup_folder=$1      # Host path to extracted backup folder
+    local container=$2          # WildFly container name
+
+    rm -rf "$backup_folder/var/lib/aktin/import-scripts"
+    sudo docker cp "$backup_folder/var/lib/aktin/." "$container:/var/lib/aktin"
+    sudo docker exec -u 0 "$container" chown -R wildfly:wildfly /var/lib/aktin
 }
 
 # Remove any host-side temp artifacts tracked in host_tmp_paths[]
@@ -170,9 +197,7 @@ main() {
     copy_config_into_container "$backup_dir_host/backup_standalone.conf" "$wildfly_container:/opt/wildfly/bin/backup_standalone.conf"
     copy_config_into_container "$backup_dir_host/backup_aktin.properties" "$wildfly_container:/etc/aktin/aktin.properties"
 
-    # Push /var/lib/aktin payload and fix ownership
-    sudo docker cp "$backup_dir_host/var/lib/aktin" "$wildfly_container:/var/lib"
-    sudo docker exec -u 0 "$wildfly_container" chown -R wildfly:wildfly /var/lib/aktin
+    merge_aktin_lib_dir "$backup_dir_host" "$wildfly_container"
 
     # Bring everything back up and clean host temp files
     restart_stack
