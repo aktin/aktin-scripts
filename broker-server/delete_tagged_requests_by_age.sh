@@ -42,10 +42,10 @@ write_to_file() {
 
   if [[ "$HAS_WRITTEN_HEADER" == "false" ]]; then
     touch "$LOG_FILE"
-    echo "$STARTUP_LOG_BUFFER" >> "$LOG_FILE"
+    echo "$STARTUP_LOG_BUFFER" >>"$LOG_FILE"
     HAS_WRITTEN_HEADER=true
   fi
-  echo "[$timestamp] $msg" >> "$LOG_FILE"
+  echo "[$timestamp] $msg" >>"$LOG_FILE"
 }
 
 get_tagged_request_ids() {

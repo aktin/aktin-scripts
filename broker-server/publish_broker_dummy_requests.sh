@@ -24,8 +24,8 @@ readonly dummy_requests_zip=$3
 
 readonly node_ids=(${@:4})
 if [ ${#node_ids[@]} -eq 0 ]; then
-    echo "At least one node id is required as input"
-    exit 1
+  echo "At least one node id is required as input"
+  exit 1
 fi
 
 extract_zip_and_get_extracted_folder() {

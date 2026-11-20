@@ -34,7 +34,7 @@ stop_and_wait_for_service() {
     return 1
   }
   # wait until the service is stopped or the timeout is reached
-  for (( i=0; i<$timeout; i++ )); do
+  for ((i = 0; i < $timeout; i++)); do
     sudo service "$service_name" status | grep -q 'not running' && break
     sleep 1
   done
@@ -56,7 +56,7 @@ start_and_wait_for_service() {
     return 1
   }
   # wait until the service is running or the timeout is reached
-  for (( i=0; i<$timeout; i++ )); do
+  for ((i = 0; i < $timeout; i++)); do
     sudo service "$service_name" status | grep -q 'running' && break
     sleep 1
   done
