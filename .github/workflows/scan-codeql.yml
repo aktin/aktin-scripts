@@ -1,0 +1,24 @@
+name: scan-codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    uses: aktin/aktin-github-scripts/.github/workflows/scan-codeql.yml@main
+    with:
+      languages: actions
