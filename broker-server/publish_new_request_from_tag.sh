@@ -5,6 +5,8 @@
 # Author:       whoy@ukaachen.de, akombeiz@ukaachen.de
 # Purpose:      Automates the duplication of a tagged request by retrieving the latest matching
 #               request, updating its dates, and publishing it to the broker.
+# Runtime:      Ubuntu 24.04 (GNU coreutils date) or Ubuntu 26.04 (uutils date) only.
+#               The date arithmetic is not tested with other date implementations.
 #--------------------------------------
 
 set -euo pipefail
@@ -47,8 +49,11 @@ increase_date_in_request_content() {
   old_date=$(echo "$content" | sed -n "s/.*<$element>\(.*\)<\/$element>.*/\1/p")
 
   # add TIME_INCREMENT to local_time and convert back to utc
+  # TIME_INCREMENT goes before local_time, as GNU date reads a sign after a time as UTC offset
+  local local_time
+  local_time=$(TZ="$LOCAL_TIMEZONE" date -d "$old_date" +"%F %T")
   local new_date
-  new_date=$(date -u -d "TZ=\"$LOCAL_TIMEZONE\" $(TZ="$LOCAL_TIMEZONE" date -d "$old_date" +"%F %T") + $TIME_INCREMENT" +"%Y-%m-%dT%H:%M:%S.000Z")
+  new_date=$(date -u -d "@$(TZ="$LOCAL_TIMEZONE" date -d "$TIME_INCREMENT $local_time" +%s)" +"%Y-%m-%dT%H:%M:%S.000Z")
   echo "$content" | sed "s|<$element>$old_date</$element>|<$element>$new_date</$element>|"
 }
 
