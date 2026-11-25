@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------
 # Script Name:  publish_new_request_from_tag.sh
-# Version:      1.1
+# Version:      1.2
 # Author:       whoy@ukaachen.de, akombeiz@ukaachen.de
 # Purpose:      Automates the duplication of a tagged request by retrieving the latest matching
 #               request, updating its dates, and publishing it to the broker.
@@ -22,6 +22,7 @@ readonly BROKER_URL="$1/broker"
 readonly AUTH_HEADER="Authorization: Bearer $2"
 readonly TAG="$3"
 readonly TIME_INCREMENT="${4:-"7 days"}"
+readonly LOCAL_TIMEZONE="Europe/Berlin"
 
 get_max_id_of_tagged_requests() {
   local requests
@@ -44,8 +45,10 @@ increase_date_in_request_content() {
   local element="$2"
   local old_date
   old_date=$(echo "$content" | sed -n "s/.*<$element>\(.*\)<\/$element>.*/\1/p")
+
+  # add TIME_INCREMENT to local_time and convert back to utc
   local new_date
-  new_date=$(date -u -d "$old_date + $TIME_INCREMENT" +"%Y-%m-%dT%H:%M:%S.000Z")
+  new_date=$(date -u -d "TZ=\"$LOCAL_TIMEZONE\" $(TZ="$LOCAL_TIMEZONE" date -d "$old_date" +"%F %T") + $TIME_INCREMENT" +"%Y-%m-%dT%H:%M:%S.000Z")
   echo "$content" | sed "s|<$element>$old_date</$element>|<$element>$new_date</$element>|"
 }
 
