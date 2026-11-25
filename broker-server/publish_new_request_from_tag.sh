@@ -28,8 +28,8 @@ get_max_id_of_tagged_requests() {
   local requests
   requests=$(curl -s --request GET "$BROKER_URL/request/filtered?type=application/vnd.aktin.query.request%2Bxml&predicate=//queryRequest/query/principal/tags/tag='$TAG'" --header "$AUTH_HEADER")
   if ! echo "$requests" | grep -q "<request "; then
-    echo "No requests found with tag '$TAG'. Exiting."
-    exit 0
+    echo "No requests found with tag '$TAG'. Exiting." >&2
+    return 1
   fi
   echo "$requests" | grep -oP '(?<=request id=")[0-9]+' | sort -nr | head -n1
 }
@@ -89,7 +89,7 @@ publish_request() {
 }
 
 main() {
-  max_id=$(get_max_id_of_tagged_requests)
+  max_id=$(get_max_id_of_tagged_requests) || exit 0
   new_id=$(allocate_new_request)
   updated_request=$(clone_and_update_request "$max_id" "$new_id")
   add_request_definition "$new_id" "$updated_request"
